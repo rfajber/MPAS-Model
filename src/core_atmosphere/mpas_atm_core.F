@@ -635,6 +635,8 @@ module atm_core
       real (kind=RKIND) :: dt
       logical, pointer :: config_do_restart
       logical, pointer :: config_apply_lbcs
+      logical, pointer :: config_apply_nudging
+      logical :: read_driving_state
       type (block_type), pointer :: block_ptr
 
       type (MPAS_Time_Type) :: currTime
@@ -728,11 +730,16 @@ module atm_core
 #endif
 
       call mpas_pool_get_config(domain % blocklist % configs, 'config_apply_lbcs', config_apply_lbcs)
+      call mpas_pool_get_config(domain % blocklist % configs, 'config_apply_nudging', config_apply_nudging)
+
+      ! Limited-area lateral boundary conditions and nudging toward a driving state are both
+      ! driven by the 'lbc_in' stream, and either one is reason to read it.
+      read_driving_state = (config_apply_lbcs .or. config_apply_nudging)
 
       !
       ! Read initial boundary state
       !
-      if (config_apply_lbcs .and. &
+      if (read_driving_state .and. &
           MPAS_stream_mgr_ringing_alarms(domain % streamManager, streamID='lbc_in', direction=MPAS_STREAM_INPUT, ierr=ierr)) then
          block_ptr => domain % blocklist
          do while (associated(block_ptr))
@@ -762,7 +769,7 @@ module atm_core
          !
          ! Read future boundary state and compute boundary tendencies
          !
-         if (config_apply_lbcs .and. &
+         if (read_driving_state .and. &
              MPAS_stream_mgr_ringing_alarms(domain % streamManager, streamID='lbc_in', direction=MPAS_STREAM_INPUT, ierr=ierr)) then
             block_ptr => domain % blocklist
             do while (associated(block_ptr))

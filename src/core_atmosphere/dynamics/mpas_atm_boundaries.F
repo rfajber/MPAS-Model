@@ -791,6 +791,7 @@ module mpas_atm_boundaries
 
         character(len=StrKIND) :: input_interval
         logical, pointer :: config_apply_lbcs => null()
+        logical, pointer :: config_apply_nudging => null()
         integer, pointer :: nCellsSolve => null()
         type (mpas_pool_type), pointer :: meshPool => null()
         type (block_type), pointer :: block => null()
@@ -799,10 +800,12 @@ module mpas_atm_boundaries
 
 
         call mpas_pool_get_config(blocklist % configs, 'config_apply_lbcs', config_apply_lbcs)
+        call mpas_pool_get_config(blocklist % configs, 'config_apply_nudging', config_apply_nudging)
 
         call mpas_log_write('')
         call mpas_log_write('Checking consistency of limited-area settings...')
         call mpas_log_write(' - config_apply_lbcs = $l', logicArgs=(/config_apply_lbcs/))
+        call mpas_log_write(' - config_apply_nudging = $l', logicArgs=(/config_apply_nudging/))
 
         !
         ! Check whether any elements of bdyMaskCell have non-zero values
@@ -847,9 +850,10 @@ module mpas_atm_boundaries
         end if
 
         !
-        ! If config_apply_lbcs = true, check that the 'lbc_in' stream has a valid input interval
+        ! The 'lbc_in' stream drives both lateral boundary conditions and nudging, so if either is
+        ! enabled, check that the stream has a valid input interval
         !
-        if (config_apply_lbcs) then
+        if (config_apply_lbcs .or. config_apply_nudging) then
             call mpas_stream_mgr_get_property(streamManager, 'lbc_in', MPAS_STREAM_PROPERTY_RECORD_INTV, &
                                               input_interval, MPAS_STREAM_INPUT, ierr)
             if (ierr /= MPAS_STREAM_MGR_NOERR) then
@@ -861,7 +865,8 @@ module mpas_atm_boundaries
             call mpas_log_write(' - Input interval for ''lbc_in'' stream = '''//trim(input_interval)//'''')
             if (trim(input_interval) == 'none') then
                 call mpas_log_write('Input interval for the ''lbc_in'' stream must be a valid interval '// &
-                                    'when config_apply_lbcs = true.', messageType=MPAS_LOG_ERR)
+                                    'when config_apply_lbcs = true or config_apply_nudging = true.', &
+                                    messageType=MPAS_LOG_ERR)
                 ierr = 1
                 return
             end if

@@ -122,6 +122,8 @@ module atm_core_interface
       character(len=StrKIND), pointer :: config_iau_option
       logical, pointer :: limited_areaActive
       logical, pointer :: config_apply_lbcs
+      logical, pointer :: nudgingActive
+      logical, pointer :: config_apply_nudging
       logical, pointer :: config_jedi_da, jedi_daActive
       logical, pointer :: no_invariant_streamActive
       logical, pointer :: ugwp_orog_streamActive
@@ -167,6 +169,21 @@ module atm_core_interface
          limited_areaActive = .true.
       else
          limited_areaActive = .false.
+      end if
+
+      !
+      ! Nudging toward a driving state
+      !
+      nullify(config_apply_nudging)
+      call mpas_pool_get_config(configs, 'config_apply_nudging', config_apply_nudging)
+
+      nullify(nudgingActive)
+      call mpas_pool_get_package(packages, 'nudgingActive', nudgingActive)
+
+      if (config_apply_nudging) then
+         nudgingActive = .true.
+      else
+         nudgingActive = .false.
       end if
 
       !

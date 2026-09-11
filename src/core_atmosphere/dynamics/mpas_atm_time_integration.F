@@ -35,7 +35,8 @@ module atm_time_integration
 
    use mpas_atm_boundaries, only : nSpecZone, nRelaxZone, nBdyZone, mpas_atm_get_bdy_state, mpas_atm_get_bdy_tend  ! regional_MPAS addition
    
-   use mpas_atm_iau  
+   use mpas_atm_iau
+   use mpas_atm_nudging
    use mpas_atm_dissipation_models
 
    ! Provides definition of halo_exchange_routine
@@ -915,6 +916,8 @@ module atm_time_integration
 
       logical, pointer :: config_apply_lbcs_ptr
       logical :: config_apply_lbcs
+      logical, pointer :: config_apply_nudging_ptr
+      logical :: config_apply_nudging
 
       real (kind=RKIND), dimension(:,:), pointer :: ru, ru_p
       real (kind=RKIND), dimension(:,:), pointer :: ru_save
@@ -974,6 +977,8 @@ module atm_time_integration
 
       call mpas_pool_get_config(domain % blocklist % configs, 'config_apply_lbcs', config_apply_lbcs_ptr)
       config_apply_lbcs = config_apply_lbcs_ptr
+      call mpas_pool_get_config(domain % blocklist % configs, 'config_apply_nudging', config_apply_nudging_ptr)
+      config_apply_nudging = config_apply_nudging_ptr
 
       MPAS_ACC_TIMER_START('atm_srk3 [ACC_data_xfer]')
       call mpas_pool_get_array(diag, 'ru', ru)
@@ -1136,7 +1141,9 @@ module atm_time_integration
       !$acc enter data copyin(scalar_tend_save)
 
 
-      if(config_apply_lbcs) then
+      ! The 'lbc' fields are also read by the nudging scheme, so they must be resident on the
+      ! device whenever either limited-area boundaries or nudging is active
+      if(config_apply_lbcs .or. config_apply_nudging) then
          call mpas_pool_get_array(lbc, 'lbc_u', lbc_u, 2)
          !$acc enter data copyin(lbc_u)
          call mpas_pool_get_array(lbc, 'lbc_w', lbc_w, 2)
@@ -1202,6 +1209,8 @@ module atm_time_integration
 
       logical, pointer :: config_apply_lbcs_ptr
       logical :: config_apply_lbcs
+      logical, pointer :: config_apply_nudging_ptr
+      logical :: config_apply_nudging
 
       real (kind=RKIND), dimension(:,:), pointer :: ru, ru_p
       real (kind=RKIND), dimension(:,:), pointer :: ru_save
@@ -1260,6 +1269,8 @@ module atm_time_integration
 
       call mpas_pool_get_config(domain % blocklist % configs, 'config_apply_lbcs', config_apply_lbcs_ptr)
       config_apply_lbcs = config_apply_lbcs_ptr
+      call mpas_pool_get_config(domain % blocklist % configs, 'config_apply_nudging', config_apply_nudging_ptr)
+      config_apply_nudging = config_apply_nudging_ptr
 
       MPAS_ACC_TIMER_START('atm_srk3 [ACC_data_xfer]')
       call mpas_pool_get_array(diag, 'ru', ru)
@@ -1422,7 +1433,9 @@ module atm_time_integration
       call mpas_pool_get_array(tend, 'scalars_tend', scalar_tend_save)
       !$acc exit data copyout(scalar_tend_save)
 
-      if(config_apply_lbcs) then
+      ! The 'lbc' fields are also read by the nudging scheme, so they must be resident on the
+      ! device whenever either limited-area boundaries or nudging is active
+      if(config_apply_lbcs .or. config_apply_nudging) then
          call mpas_pool_get_array(lbc, 'lbc_u', lbc_u, 2)
          !$acc exit data delete(lbc_u)
          call mpas_pool_get_array(lbc, 'lbc_w', lbc_w, 2)
@@ -1912,6 +1925,7 @@ module atm_time_integration
       integer :: nCells, nEdges, nVertices, nEdgesSolve, nVertLevels, num_scalars
 
       character(len=StrKIND), pointer :: config_IAU_option
+      logical, pointer :: config_apply_nudging
 
       type (mpas_pool_type), pointer :: state
       type (mpas_pool_type), pointer :: diag
@@ -1949,6 +1963,7 @@ module atm_time_integration
       call mpas_pool_get_config(block % configs, 'config_monotonic', config_monotonic)
       call mpas_pool_get_config(block % configs, 'config_gpu_aware_mpi', config_gpu_aware_mpi)
       call mpas_pool_get_config(block % configs, 'config_IAU_option', config_IAU_option)
+      call mpas_pool_get_config(block % configs, 'config_apply_nudging', config_apply_nudging)
       !  config variables for dynamics-transport splitting, WCS 18 November 2014
       call mpas_pool_get_config(block % configs, 'config_split_dynamics_transport', config_split_dynamics_transport)
       call mpas_pool_get_config(block % configs, 'config_dynamics_split_steps', config_dynamics_split)
@@ -2171,6 +2186,17 @@ module atm_time_integration
                                      tend_ru_physics, tend_rtheta_physics, tend_rho_physics)
          call post_add_tend_anal_incr(block % configs, block % structs, tend_ru_physics, &
                                       tend_rtheta_physics, tend_rho_physics)
+      end if
+
+      !
+      ! Nudging toward a driving state
+      !
+      if (config_apply_nudging) then
+         call mpas_timer_start('atm_add_tend_nudging')
+         call pre_add_tend_nudging(block % structs)
+         call atm_add_tend_nudging(clock, block, tend_ru_physics, tend_rtheta_physics, tend_rho_physics)
+         call post_add_tend_nudging(block % structs, tend_ru_physics, tend_rtheta_physics, tend_rho_physics)
+         call mpas_timer_stop('atm_add_tend_nudging')
       end if
 
 

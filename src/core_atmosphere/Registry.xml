@@ -352,6 +352,37 @@
                      possible_values="true or false; this option must be set to true for limited-area simulations and false for global simulations"/>
 	</nml_record>
 
+        <nml_record name="nudging" in_defaults="true">
+                <nml_option name="config_apply_nudging" type="logical" default_value="false"
+                     units="-"
+                     description="Whether to relax the model state toward a driving state read from the 'lbc_in' stream"
+                     possible_values="true or false; when true, the 'lbc_in' stream must provide driving data over the full mesh"/>
+                <nml_option name="config_nudging_tau_u" type="real" default_value="21600."
+                     units="s"
+                     description="Relaxation timescale for the horizontal velocity"
+                     possible_values="Positive real values; a non-positive value disables nudging of the horizontal velocity"/>
+                <nml_option name="config_nudging_tau_theta" type="real" default_value="21600."
+                     units="s"
+                     description="Relaxation timescale for the potential temperature"
+                     possible_values="Positive real values; a non-positive value disables nudging of the potential temperature"/>
+                <nml_option name="config_nudging_tau_qv" type="real" default_value="21600."
+                     units="s"
+                     description="Relaxation timescale for the water vapor mixing ratio"
+                     possible_values="Positive real values; a non-positive value disables nudging of the water vapor mixing ratio"/>
+                <nml_option name="config_nudging_tau_rho" type="real" default_value="21600."
+                     units="s"
+                     description="Relaxation timescale for the dry air density, through which surface pressure is nudged"
+                     possible_values="Positive real values; a non-positive value disables nudging of the dry air density. Nudging the mass field too strongly may excite spurious gravity waves"/>
+                <nml_option name="config_nudging_zbot" type="real" default_value="0."
+                     units="m"
+                     description="Height above ground level below which no nudging is applied"
+                     possible_values="Non-negative real values less than config_nudging_ztop; the vertical taper is disabled when config_nudging_ztop &lt;= config_nudging_zbot"/>
+                <nml_option name="config_nudging_ztop" type="real" default_value="0."
+                     units="m"
+                     description="Height above ground level above which the full nudging strength is applied, ramping linearly from zero at config_nudging_zbot"
+                     possible_values="Non-negative real values greater than config_nudging_zbot; the vertical taper is disabled when config_nudging_ztop &lt;= config_nudging_zbot"/>
+	</nml_record>
+
         <nml_record name="io" in_defaults="true">
                 <nml_option name="config_restart_timestamp_name" type="character" default_value="restart_timestamp" in_defaults="false"
                      units="-"
@@ -477,6 +508,7 @@
 
                 <package name="iau" description="Incremental Analysis Update"/>
                 <package name="limited_area" description="Limited-area simulations, which have lateral boundaries"/>
+                <package name="nudging" description="Relaxation of the model state toward a driving state"/>
                 <package name="jedi_da" description="Data Assimilation in JEDI framework"/>
                 <package name="no_invariant_stream" description="No separate invariant I/O stream is active"/>
                 <package name="ugwp_orog_stream" description="Input stream (and variables) for UGWP orography"/>
@@ -1189,7 +1221,7 @@
                         input_interval="3:00:00" 
                         runtime_format="single_file"
                         immutable="true"
-                        packages="limited_area">
+                        packages="limited_area;nudging">
 
                         <var name="lbc_u" />
                         <var name="lbc_w" />
@@ -2121,7 +2153,7 @@
         <!-- Time-level 1 contains tendencies for variables                                        -->
         <!-- Time-level 2 contains values for variables valid at the end of the boundary interval  -->
         <!-- ===================================================================================== -->
-        <var_struct name="lbc" time_levs="2" packages="limited_area">
+        <var_struct name="lbc" time_levs="2" packages="limited_area;nudging">
                 <var name="lbc_u" type="real" dimensions="nVertLevels nEdges Time" units="m s^{-2}"
                      description="Lateral boundary tendency of u"/>
 
