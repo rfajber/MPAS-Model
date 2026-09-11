@@ -1,3 +1,6 @@
+NOTE - this is an experimental repo, meant for doing some testing of a grid cell nudging scheme for the atmos core
+code is developed with AI, see commit notes for details.
+
 MPAS-v8.4.2
 ====
 
