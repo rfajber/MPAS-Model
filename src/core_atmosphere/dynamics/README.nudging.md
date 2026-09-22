@@ -32,12 +32,15 @@ Surface pressure is not a prognostic variable in MPAS, so it is nudged
 indirectly through the dry density `rho_zz`: constraining the column mass
 constrains the surface pressure.
 
-**This is grid nudging, not spectral nudging.** The relaxation is applied at
-every resolved scale. Because the driving state is smooth relative to the model
-mesh, nudging toward it also damps small scales that the model generates itself.
-If you need true scale selectivity — constraining only wavenumbers below a
-cutoff, in the sense of von Storch et al. (2000) — that filter is not
-implemented here. See *Extending the scheme* below.
+By default the relaxation is applied to the instantaneous departure at every
+resolved scale — that is, plain grid nudging. Because the driving state is
+smooth relative to the model mesh, nudging toward it that way also damps small
+scales the model generates itself.
+
+Setting `config_nudging_filter_tau` makes the scheme scale-selective *in time*
+instead, which in practice also selects in space. See **Temporal low-pass
+filtering** below. Selectivity in wavenumber directly, in the sense of von
+Storch et al. (2000), is not implemented; see *Extending the scheme*.
 
 
 ## Where it acts
@@ -66,6 +69,8 @@ All options live in the `nudging` record of `namelist.atmosphere`.
 | `config_nudging_tau_rho` | real | `21600.` | Relaxation timescale for dry density, and hence surface pressure, in seconds |
 | `config_nudging_zbot` | real | `0.` | Height AGL below which no nudging is applied, in metres |
 | `config_nudging_ztop` | real | `0.` | Height AGL above which the full nudging strength is applied, in metres |
+| `config_nudging_filter_tau` | real | `0.` | Timescale of the temporal low-pass filter on the departure, in seconds; non-positive disables it |
+| `config_nudging_filter_stages` | integer | `2` | Number of cascaded first-order sections in that filter |
 
 A non-positive timescale disables nudging of that variable, so individual fields
 can be switched off without rebuilding.
@@ -90,6 +95,80 @@ A minimal configuration:
     config_nudging_ztop      = 2000.
 /
 ```
+
+To make that scale-selective, add a filter timescale:
+
+```
+    config_nudging_filter_tau    = 86400.
+    config_nudging_filter_stages = 2
+```
+
+
+## Temporal low-pass filtering
+
+Setting `config_nudging_filter_tau` to a positive value passes the departure
+from the driving state through a low-pass filter in time before it is relaxed,
+so that only the slowly evolving part of the departure is forced.
+
+This is scale-selective in practice, because atmospheric scales are linked
+advectively: an eddy of size `L` turns over in roughly `L/U`. At a typical
+`U ~ 10 m/s`, a 1000 km wave evolves over about a day while a 100 km feature
+evolves in about three hours. Filtering out the fast part of the departure
+therefore leaves the model's own small-scale variability largely free while
+still holding the large-scale flow to the driving data.
+
+A filter timescale of one to two days is a reasonable starting point. As a
+guide, a two-stage cascade with `config_nudging_filter_tau = 86400.` passes a
+10-day signal at about 91% amplitude and attenuates a 3-hour signal to about
+0.16% — a separation of roughly 600.
+
+### The filter
+
+Each stage is a first-order recursion, `f <- f + a·(input − f)`, with the output
+of one stage feeding the next. The requested timescale is divided across the
+cascade, so adding stages sharpens the rolloff and flattens the passband without
+changing how far back the filter reaches.
+
+This is an IIR filter, which matters for memory: its entire state is the stage
+values themselves. A true boxcar running mean would instead need the whole
+window of past samples retained, because the sample leaving the window changes
+every step — the incremental update `mean += (new − old)/N` saves the summation
+but not the storage. One or two extra stages buys a better-shaped filter far
+more cheaply than a boxcar of any useful length, and without a boxcar's
+accumulating round-off.
+
+### Why the departure and not both states
+
+The filter is applied to the departure, not to the model and driving states
+separately. For a linear filter `LP[x_model] − LP[x_drv] == LP[x_model − x_drv]`,
+so the two are mathematically identical, but filtering the departure needs one
+set of filter states rather than two.
+
+It also removes a trap. Any causal filter lags, so filtering the model state
+in-model while pre-filtering the reanalysis offline with a centred window would
+leave the two sides out of step and put a systematic timing error into the
+forcing. Filtering the departure means whatever lag the filter has is common to
+both terms and cancels exactly, so the result does not depend on the filter's
+phase response at all. This is also why there is no reason to pre-filter the
+ERA5 data offline.
+
+### Memory and restarts
+
+The filter stores one array per field per stage, over four fields (`u` on edges,
+`theta`, `qv` and `rho_zz` on cells). Taking one cell field of
+`nVertLevels × 8` bytes as the unit, and using `nEdges ≈ 3·nCells`, that is
+6 units per stage, or about 2.6 KB per owned cell per stage at 55 levels in
+double precision. For comparison the `lbc` pool already costs roughly 52 units,
+about 23 KB per cell, so a two-stage filter adds around 23% to the memory the
+nudging feature already uses. Fields are allocated only when the filter is
+active.
+
+The filter states are carried in the `restart` stream. On a cold start every
+stage is seeded with the current departure, so the filter begins in equilibrium
+rather than ramping up from zero; on a restart the states come from the restart
+file. If you restart a run in which nudging was previously switched off, the
+filter will re-seed and there will be a short transient in the forcing while it
+spins up.
 
 
 ## Input stream
@@ -268,6 +347,10 @@ state. Some rules of thumb:
   these deliberately, start with longer timescales than you use for the wind,
   and check that the surface pressure tendency and precipitation fields still
   look reasonable.
+* The relaxation timescale and `config_nudging_filter_tau` are independent
+  knobs, but the nudging cannot respond faster than the slower of the two: a
+  filter timescale much longer than the relaxation timescale becomes the
+  effective response time, no matter how small the relaxation timescale is.
 
 
 ## Implementation notes
@@ -277,9 +360,16 @@ called from `atm_srk3` in `mpas_atm_time_integration.F`, immediately after the
 IAU block and before the dynamics substep loop. `mpas_atm_iau.F` is the closest
 structural analogue and was used as the template.
 
-Fields and the `lbc_in` stream are gated on the `nudging` package, activated
-from `config_apply_nudging` in `atm_setup_packages`, so nothing is allocated
-when nudging is switched off.
+There are two packages, both activated in `atm_setup_packages`. The `nudging`
+package follows `config_apply_nudging` and gates the `lbc` fields and the
+`lbc_in` stream; `nudging_filter` additionally requires
+`config_nudging_filter_tau > 0` and gates the `nudging` var_struct holding the
+filter states. Nothing is allocated when the corresponding feature is off, so
+enabling nudging without the filter costs no filter memory.
+
+The number of filter stages is a namelist-defined Registry dimension,
+`nNudgeFilterStages`, and the filter states are declared with it as their
+leading dimension so that each column's cascade is contiguous in memory.
 
 The conversion from a dry potential temperature tendency to a `theta_m` tendency
 in this module deliberately differs from the corresponding conversion in
@@ -292,21 +382,36 @@ source.
 
 ### Extending the scheme
 
-To make the nudging scale-selective, apply a low-pass filter to both the model
-state and the driving state before differencing them, inside
-`atm_add_tend_nudging` between the `mpas_atm_get_bdy_state` calls and the
-relaxation loops. Nothing else in the plumbing needs to change. An iterated
-Laplacian smoother over cells is the natural choice on an unstructured mesh: it
-is local, reuses the existing halo exchanges, and works on variable-resolution
-and regional meshes, at the cost of a smooth rather than sharp cutoff. A true
-spherical-harmonic truncation would be closer to the classical formulation but
-requires global reductions and only works on global meshes.
+Scale selectivity in space, rather than in time, would mean low-pass filtering
+the departure spatially inside `atm_add_tend_nudging`, between the
+`mpas_atm_get_bdy_state` calls and the relaxation loops. The same identity used
+for the temporal filter applies, so only the departure needs filtering.
+
+An iterated Laplacian smoother over cells is the natural choice on an
+unstructured mesh: local, reuses the existing halo exchanges, and works on
+variable-resolution and regional meshes, at the cost of a smooth rather than
+sharp cutoff. Two practical obstacles are worth knowing before starting.
+`u` is the edge-normal component, so smoothing it needs a vector Laplacian or a
+reconstruct-and-project round trip rather than the scalar stencil that serves
+the cell fields; and `mpas_dmpar_exch_group_add_field` takes a Registry field
+name, so the smoothing work arrays must be Registry fields with a new exchange
+group in `mpas_atm_halos.F`. A spherical-harmonic truncation would be closer to
+the classical formulation but requires global reductions and only works on
+global meshes.
 
 ### Known limitations
 
-* The scheme is not scale-selective, as described above.
+* Scale selectivity is available in time but not in wavenumber. The time-space
+  correspondence is statistical, not exact: a terrain-locked mesoscale feature
+  is stationary, so it has a long timescale and passes the filter and is still
+  nudged, while a genuinely fast large-scale mode such as the diurnal cycle is
+  filtered out and is not.
 * `scalars_tend` is only zeroed inside `physics_get_tend`, which is compiled out
   in builds without physics. Moisture nudging therefore assumes a
   physics-enabled build. This is the same exposure the IAU scheme already has.
-* The OpenACC path moves the `lbc` fields to the device when nudging is active,
-  but the scheme has not been tested on GPUs.
+* The OpenACC path moves the `lbc` fields and the filter states to the device
+  when nudging is active, but the scheme has not been tested on GPUs.
+* The unfiltered scheme has been validated in a full simulation. The temporal
+  filter has not: that code path, including the restart of the filter states,
+  has never been exercised in a real run. Treat it as less proven than the rest
+  when enabling `config_nudging_filter_tau`.

@@ -3,15 +3,18 @@
 OBJS = mpas_atm_time_integration.o \
        mpas_atm_boundaries.o \
        mpas_atm_nudging.o \
+       mpas_atm_held_suarez.o \
        mpas_atm_dissipation_models.o
 
 all: $(OBJS)
 
-mpas_atm_time_integration.o: mpas_atm_boundaries.o mpas_atm_iau.o mpas_atm_nudging.o mpas_atm_dissipation_models.o
+mpas_atm_time_integration.o: mpas_atm_boundaries.o mpas_atm_iau.o mpas_atm_nudging.o mpas_atm_held_suarez.o mpas_atm_dissipation_models.o
 
 mpas_atm_boundaries.o:
 
 mpas_atm_nudging.o: mpas_atm_boundaries.o
+
+mpas_atm_held_suarez.o:
 
 
 clean:

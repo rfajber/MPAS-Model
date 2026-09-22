@@ -56,20 +56,54 @@ module mpas_atm_nudging
 
 
 !==================================================================================================
- subroutine pre_add_tend_nudging(structs)
+ pure subroutine nudging_filter_update(f, d_in, a)
+!==================================================================================================
+! Advance one column of the low-pass filter cascade by a single timestep and leave the filtered
+! value in the last stage. Each stage is a first-order section, f <- f + a*(input - f), with the
+! output of one stage feeding the next; cascading sharpens the rolloff and flattens the passband
+! relative to a single section.
+!
+! Note that the cascade is an IIR filter: its entire memory is the stage values themselves. A true
+! boxcar running mean would instead require the whole window of past samples to be retained, since
+! the sample leaving the window changes every step.
+
+      implicit none
+
+      real (kind=RKIND), dimension(:), intent(inout) :: f
+      real (kind=RKIND), intent(in) :: d_in
+      real (kind=RKIND), intent(in) :: a
+
+      integer :: s
+      real (kind=RKIND) :: x
+
+      x = d_in
+      do s = 1, size(f)
+         f(s) = f(s) + a * (x - f(s))
+         x = f(s)
+      end do
+
+ end subroutine nudging_filter_update
+
+
+!==================================================================================================
+ subroutine pre_add_tend_nudging(configs, structs)
 !==================================================================================================
 
       implicit none
 
+      type (mpas_pool_type), intent(in) :: configs
       type (mpas_pool_type), intent(inout) :: structs
 
 #ifdef MPAS_OPENACC
       type (mpas_pool_type), pointer :: tend
       type (mpas_pool_type), pointer :: state
       type (mpas_pool_type), pointer :: diag
+      type (mpas_pool_type), pointer :: nudging
 
+      real (kind=RKIND), pointer :: config_nudging_filter_tau
       real (kind=RKIND), dimension(:,:), pointer :: rho_edge, rho_zz, theta_m, u
       real (kind=RKIND), dimension(:,:,:), pointer :: scalars, tend_scalars
+      real (kind=RKIND), dimension(:,:,:), pointer :: filt_u, filt_theta, filt_qv, filt_rho
 
       call mpas_pool_get_subpool(structs, 'tend', tend)
       call mpas_pool_get_subpool(structs, 'state', state)
@@ -85,6 +119,16 @@ module mpas_atm_nudging
 
       call mpas_pool_get_array(tend, 'scalars_tend', tend_scalars)
       !$acc update self(tend_scalars)
+
+      call mpas_pool_get_config(configs, 'config_nudging_filter_tau', config_nudging_filter_tau)
+      if (config_nudging_filter_tau > 0.0_RKIND) then
+         call mpas_pool_get_subpool(structs, 'nudging', nudging)
+         call mpas_pool_get_array(nudging, 'nudging_filter_u', filt_u)
+         call mpas_pool_get_array(nudging, 'nudging_filter_theta', filt_theta)
+         call mpas_pool_get_array(nudging, 'nudging_filter_qv', filt_qv)
+         call mpas_pool_get_array(nudging, 'nudging_filter_rho_zz', filt_rho)
+         !$acc update self(filt_u, filt_theta, filt_qv, filt_rho)
+      end if
       MPAS_ACC_TIMER_STOP('atm_srk3: nudging ACC_data_xfer')
 #endif
 
@@ -92,11 +136,12 @@ module mpas_atm_nudging
 
 
 !==================================================================================================
- subroutine post_add_tend_nudging(structs, tend_ru, tend_rtheta, tend_rho)
+ subroutine post_add_tend_nudging(configs, structs, tend_ru, tend_rtheta, tend_rho)
 !==================================================================================================
 
       implicit none
 
+      type (mpas_pool_type), intent(in) :: configs
       type (mpas_pool_type), intent(inout) :: structs
       real (kind=RKIND), dimension(:,:), intent(inout) :: tend_ru
       real (kind=RKIND), dimension(:,:), intent(inout) :: tend_rtheta
@@ -104,8 +149,11 @@ module mpas_atm_nudging
 
 #ifdef MPAS_OPENACC
       type (mpas_pool_type), pointer :: tend
+      type (mpas_pool_type), pointer :: nudging
 
+      real (kind=RKIND), pointer :: config_nudging_filter_tau
       real (kind=RKIND), dimension(:,:,:), pointer :: tend_scalars
+      real (kind=RKIND), dimension(:,:,:), pointer :: filt_u, filt_theta, filt_qv, filt_rho
 
       call mpas_pool_get_subpool(structs, 'tend', tend)
 
@@ -114,6 +162,16 @@ module mpas_atm_nudging
 
       call mpas_pool_get_array(tend, 'scalars_tend', tend_scalars)
       !$acc update device(tend_scalars)
+
+      call mpas_pool_get_config(configs, 'config_nudging_filter_tau', config_nudging_filter_tau)
+      if (config_nudging_filter_tau > 0.0_RKIND) then
+         call mpas_pool_get_subpool(structs, 'nudging', nudging)
+         call mpas_pool_get_array(nudging, 'nudging_filter_u', filt_u)
+         call mpas_pool_get_array(nudging, 'nudging_filter_theta', filt_theta)
+         call mpas_pool_get_array(nudging, 'nudging_filter_qv', filt_qv)
+         call mpas_pool_get_array(nudging, 'nudging_filter_rho_zz', filt_rho)
+         !$acc update device(filt_u, filt_theta, filt_qv, filt_rho)
+      end if
       MPAS_ACC_TIMER_STOP('atm_srk3: nudging ACC_data_xfer')
 #endif
 
@@ -121,7 +179,7 @@ module mpas_atm_nudging
 
 
 !==================================================================================================
- subroutine atm_add_tend_nudging(clock, block, tend_ru, tend_rtheta, tend_rho)
+ subroutine atm_add_tend_nudging(clock, block, itimestep, dt, tend_ru, tend_rtheta, tend_rho)
 !==================================================================================================
 ! Relax the model state toward the driving state held in the 'lbc' pool, which is read from the
 ! 'lbc_in' stream and time-interpolated to the current model time.
@@ -137,11 +195,25 @@ module mpas_atm_nudging
 ! and the resulting increments are then mass-coupled for the dynamics, following the same chain
 ! rule used by the IAU scheme in mpas_atm_iau.F. Because surface pressure is not prognostic in
 ! MPAS, it is nudged indirectly through the dry density rho_zz.
+!
+! When config_nudging_filter_tau is positive, the departure from the driving state is passed
+! through a temporal low-pass filter before being relaxed, so that only the slowly evolving part
+! of the departure is forced. Because atmospheric scales satisfy tau ~ L/U, damping the fast part
+! of the departure leaves the model's own small-scale variability largely free while still holding
+! the large-scale flow to the driving data.
+!
+! The filter is applied to the departure rather than to the model and driving states separately.
+! For a linear filter LP[x_model] - LP[x_drv] == LP[x_model - x_drv], so the two are identical,
+! but filtering the departure needs one set of filter states instead of two. It also means that
+! any phase lag the filter introduces is common to both terms and cancels exactly, so the result
+! does not depend on the filter's phase response.
 
       implicit none
 
       type (MPAS_Clock_type), intent(in) :: clock
       type (block_type), intent(inout) :: block
+      integer, intent(in) :: itimestep
+      real (kind=RKIND), intent(in) :: dt
       real (kind=RKIND), dimension(:,:), intent(inout) :: tend_ru
       real (kind=RKIND), dimension(:,:), intent(inout) :: tend_rtheta
       real (kind=RKIND), dimension(:,:), intent(inout) :: tend_rho
@@ -150,6 +222,7 @@ module mpas_atm_nudging
       type (mpas_pool_type), pointer :: diag
       type (mpas_pool_type), pointer :: mesh
       type (mpas_pool_type), pointer :: tend
+      type (mpas_pool_type), pointer :: nudging
 
       real (kind=RKIND), pointer :: config_nudging_tau_u
       real (kind=RKIND), pointer :: config_nudging_tau_theta
@@ -157,6 +230,8 @@ module mpas_atm_nudging
       real (kind=RKIND), pointer :: config_nudging_tau_rho
       real (kind=RKIND), pointer :: config_nudging_zbot
       real (kind=RKIND), pointer :: config_nudging_ztop
+      real (kind=RKIND), pointer :: config_nudging_filter_tau
+      logical, pointer :: config_do_restart
 
       integer, pointer :: nCells_ptr, nEdges_ptr, nCellsSolve_ptr, nEdgesSolve_ptr
       integer, pointer :: nVertLevels_ptr, index_qv_ptr
@@ -164,13 +239,17 @@ module mpas_atm_nudging
 
       real (kind=RKIND), dimension(:,:), pointer :: u, theta_m, rho_zz, rho_edge, zgrid
       real (kind=RKIND), dimension(:,:,:), pointer :: scalars, tend_scalars
+      real (kind=RKIND), dimension(:,:,:), pointer :: filt_u, filt_theta, filt_qv, filt_rho
       integer, dimension(:,:), pointer :: cellsOnEdge
 
       real (kind=RKIND), dimension(:,:), allocatable :: u_drv, theta_drv, rho_zz_drv, qv_drv
 
       real (kind=RKIND) :: alpha_u, alpha_theta, alpha_qv, alpha_rho
       real (kind=RKIND) :: zbot, ztop, zagl, taper
-      real (kind=RKIND) :: qv, theta, d_rho_zz, d_theta, d_qv, d_rqv, d_rtheta
+      real (kind=RKIND) :: qv, theta, d_rho_zz, d_theta, d_qv, d_rqv, d_rtheta, d_u
+      real (kind=RKIND) :: filter_coef
+      logical :: filter_active, filter_init
+      integer :: nStages
       integer :: iCell, iEdge, k, cell1, cell2
 
       call mpas_pool_get_config(block % configs, 'config_nudging_tau_u', config_nudging_tau_u)
@@ -179,6 +258,8 @@ module mpas_atm_nudging
       call mpas_pool_get_config(block % configs, 'config_nudging_tau_rho', config_nudging_tau_rho)
       call mpas_pool_get_config(block % configs, 'config_nudging_zbot', config_nudging_zbot)
       call mpas_pool_get_config(block % configs, 'config_nudging_ztop', config_nudging_ztop)
+      call mpas_pool_get_config(block % configs, 'config_nudging_filter_tau', config_nudging_filter_tau)
+      call mpas_pool_get_config(block % configs, 'config_do_restart', config_do_restart)
 
       !
       ! A non-positive relaxation timescale disables nudging for that variable
@@ -230,6 +311,34 @@ module mpas_atm_nudging
       call mpas_pool_get_array(tend, 'scalars_tend', tend_scalars)
 
       !
+      ! Temporal low-pass filter of the departure, if enabled
+      !
+      filter_active = (config_nudging_filter_tau > 0.0_RKIND)
+      filter_coef = 0.0_RKIND
+      nStages = 0
+      filter_init = .false.
+
+      if (filter_active) then
+         call mpas_pool_get_subpool(block % structs, 'nudging', nudging)
+         call mpas_pool_get_array(nudging, 'nudging_filter_u', filt_u)
+         call mpas_pool_get_array(nudging, 'nudging_filter_theta', filt_theta)
+         call mpas_pool_get_array(nudging, 'nudging_filter_qv', filt_qv)
+         call mpas_pool_get_array(nudging, 'nudging_filter_rho_zz', filt_rho)
+
+         nStages = size(filt_theta, 1)
+
+         ! Splitting the requested timescale across the cascade keeps the centroid of the filter
+         ! kernel at config_nudging_filter_tau as stages are added, so changing the number of
+         ! stages sharpens the filter without also changing how far back it reaches.
+         filter_coef = min(1.0_RKIND, dt * real(nStages, RKIND) / config_nudging_filter_tau)
+
+         ! On a cold start the filter states are meaningless, so seed every stage with the current
+         ! departure; the cascade update is then a no-op for this step and the filter starts in
+         ! equilibrium instead of ramping up from zero. On a restart they come from the restart file.
+         filter_init = (itimestep == 1 .and. .not. config_do_restart)
+      end if
+
+      !
       ! Driving state, linearly interpolated in time to the current model time
       !
       allocate(u_drv(nVertLevels,nEdges+1))
@@ -254,8 +363,14 @@ module mpas_atm_nudging
                       - 0.5_RKIND * (zgrid(1,cell1) + zgrid(1,cell2))
                taper = nudging_taper(zagl, zbot, ztop)
 
-               tend_ru(k,iEdge) = tend_ru(k,iEdge) &
-                                  + taper * alpha_u * rho_edge(k,iEdge) * (u_drv(k,iEdge) - u(k,iEdge))
+               d_u = u_drv(k,iEdge) - u(k,iEdge)
+               if (filter_active) then
+                  if (filter_init) filt_u(:,k,iEdge) = d_u
+                  call nudging_filter_update(filt_u(:,k,iEdge), d_u, filter_coef)
+                  d_u = filt_u(nStages,k,iEdge)
+               end if
+
+               tend_ru(k,iEdge) = tend_ru(k,iEdge) + taper * alpha_u * rho_edge(k,iEdge) * d_u
             end do
          end do
       end if
@@ -277,9 +392,27 @@ module mpas_atm_nudging
             qv = scalars(index_qv,k,iCell)
             theta = theta_m(k,iCell) / (1.0_RKIND + rvord * qv)
 
-            d_rho_zz = taper * alpha_rho * (rho_zz_drv(k,iCell) - rho_zz(k,iCell))
-            d_theta = taper * alpha_theta * (theta_drv(k,iCell) - theta)
-            d_qv = taper * alpha_qv * (qv_drv(k,iCell) - qv)
+            d_rho_zz = rho_zz_drv(k,iCell) - rho_zz(k,iCell)
+            d_theta = theta_drv(k,iCell) - theta
+            d_qv = qv_drv(k,iCell) - qv
+
+            if (filter_active) then
+               if (filter_init) then
+                  filt_rho(:,k,iCell) = d_rho_zz
+                  filt_theta(:,k,iCell) = d_theta
+                  filt_qv(:,k,iCell) = d_qv
+               end if
+               call nudging_filter_update(filt_rho(:,k,iCell), d_rho_zz, filter_coef)
+               call nudging_filter_update(filt_theta(:,k,iCell), d_theta, filter_coef)
+               call nudging_filter_update(filt_qv(:,k,iCell), d_qv, filter_coef)
+               d_rho_zz = filt_rho(nStages,k,iCell)
+               d_theta = filt_theta(nStages,k,iCell)
+               d_qv = filt_qv(nStages,k,iCell)
+            end if
+
+            d_rho_zz = taper * alpha_rho * d_rho_zz
+            d_theta = taper * alpha_theta * d_theta
+            d_qv = taper * alpha_qv * d_qv
 
             d_rqv = d_qv * rho_zz(k,iCell) + qv * d_rho_zz
             d_rtheta = d_theta * rho_zz(k,iCell) + theta * d_rho_zz

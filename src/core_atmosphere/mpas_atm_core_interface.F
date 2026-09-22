@@ -124,6 +124,10 @@ module atm_core_interface
       logical, pointer :: config_apply_lbcs
       logical, pointer :: nudgingActive
       logical, pointer :: config_apply_nudging
+      logical, pointer :: nudging_filterActive
+      real (kind=RKIND), pointer :: config_nudging_filter_tau
+      logical, pointer :: held_suarezActive
+      logical, pointer :: config_held_suarez
       logical, pointer :: config_jedi_da, jedi_daActive
       logical, pointer :: no_invariant_streamActive
       logical, pointer :: ugwp_orog_streamActive
@@ -184,6 +188,33 @@ module atm_core_interface
          nudgingActive = .true.
       else
          nudgingActive = .false.
+      end if
+
+      nullify(config_nudging_filter_tau)
+      call mpas_pool_get_config(configs, 'config_nudging_filter_tau', config_nudging_filter_tau)
+
+      nullify(nudging_filterActive)
+      call mpas_pool_get_package(packages, 'nudging_filterActive', nudging_filterActive)
+
+      if (config_apply_nudging .and. config_nudging_filter_tau > 0.0_RKIND) then
+         nudging_filterActive = .true.
+      else
+         nudging_filterActive = .false.
+      end if
+
+      !
+      ! Held-Suarez idealized forcing
+      !
+      nullify(config_held_suarez)
+      call mpas_pool_get_config(configs, 'config_held_suarez', config_held_suarez)
+
+      nullify(held_suarezActive)
+      call mpas_pool_get_package(packages, 'held_suarezActive', held_suarezActive)
+
+      if (config_held_suarez) then
+         held_suarezActive = .true.
+      else
+         held_suarezActive = .false.
       end if
 
       !

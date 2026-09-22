@@ -316,6 +316,7 @@ list(TRANSFORM ATMOSPHERE_CORE_DIAGNOSTIC_SOURCES PREPEND diagnostics/)
 set(ATMOSPHERE_CORE_DYNAMICS_SOURCES
     mpas_atm_boundaries.F
     mpas_atm_dissipation_models.F
+    mpas_atm_held_suarez.F
     mpas_atm_iau.F
     mpas_atm_nudging.F
     mpas_atm_time_integration.F)

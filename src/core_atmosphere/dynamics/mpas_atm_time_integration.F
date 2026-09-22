@@ -37,6 +37,7 @@ module atm_time_integration
    
    use mpas_atm_iau
    use mpas_atm_nudging
+   use mpas_atm_held_suarez
    use mpas_atm_dissipation_models
 
    ! Provides definition of halo_exchange_routine
@@ -1926,6 +1927,7 @@ module atm_time_integration
 
       character(len=StrKIND), pointer :: config_IAU_option
       logical, pointer :: config_apply_nudging
+      logical, pointer :: config_held_suarez
 
       type (mpas_pool_type), pointer :: state
       type (mpas_pool_type), pointer :: diag
@@ -1964,6 +1966,7 @@ module atm_time_integration
       call mpas_pool_get_config(block % configs, 'config_gpu_aware_mpi', config_gpu_aware_mpi)
       call mpas_pool_get_config(block % configs, 'config_IAU_option', config_IAU_option)
       call mpas_pool_get_config(block % configs, 'config_apply_nudging', config_apply_nudging)
+      call mpas_pool_get_config(block % configs, 'config_held_suarez', config_held_suarez)
       !  config variables for dynamics-transport splitting, WCS 18 November 2014
       call mpas_pool_get_config(block % configs, 'config_split_dynamics_transport', config_split_dynamics_transport)
       call mpas_pool_get_config(block % configs, 'config_dynamics_split_steps', config_dynamics_split)
@@ -2193,10 +2196,21 @@ module atm_time_integration
       !
       if (config_apply_nudging) then
          call mpas_timer_start('atm_add_tend_nudging')
-         call pre_add_tend_nudging(block % structs)
-         call atm_add_tend_nudging(clock, block, tend_ru_physics, tend_rtheta_physics, tend_rho_physics)
-         call post_add_tend_nudging(block % structs, tend_ru_physics, tend_rtheta_physics, tend_rho_physics)
+         call pre_add_tend_nudging(block % configs, block % structs)
+         call atm_add_tend_nudging(clock, block, itimestep, dt, tend_ru_physics, tend_rtheta_physics, &
+                                   tend_rho_physics)
+         call post_add_tend_nudging(block % configs, block % structs, tend_ru_physics, &
+                                    tend_rtheta_physics, tend_rho_physics)
          call mpas_timer_stop('atm_add_tend_nudging')
+      end if
+
+      !
+      ! Held-Suarez idealized forcing, which stands in for physics rather than supplementing it
+      !
+      if (config_held_suarez) then
+         call mpas_timer_start('atm_add_tend_held_suarez')
+         call atm_add_tend_held_suarez(block, itimestep, tend_ru_physics, tend_rtheta_physics)
+         call mpas_timer_stop('atm_add_tend_held_suarez')
       end if
 
 
