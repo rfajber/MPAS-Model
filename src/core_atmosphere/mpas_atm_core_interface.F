@@ -128,6 +128,8 @@ module atm_core_interface
       real (kind=RKIND), pointer :: config_nudging_filter_tau
       logical, pointer :: held_suarezActive
       logical, pointer :: config_held_suarez
+      logical, pointer :: slab_oceanActive
+      logical, pointer :: config_slab_ocean
       logical, pointer :: config_jedi_da, jedi_daActive
       logical, pointer :: no_invariant_streamActive
       logical, pointer :: ugwp_orog_streamActive
@@ -215,6 +217,21 @@ module atm_core_interface
          held_suarezActive = .true.
       else
          held_suarezActive = .false.
+      end if
+
+      !
+      ! Slab ocean
+      !
+      nullify(config_slab_ocean)
+      call mpas_pool_get_config(configs, 'config_slab_ocean', config_slab_ocean)
+
+      nullify(slab_oceanActive)
+      call mpas_pool_get_package(packages, 'slab_oceanActive', slab_oceanActive)
+
+      if (config_slab_ocean) then
+         slab_oceanActive = .true.
+      else
+         slab_oceanActive = .false.
       end if
 
       !

@@ -17,7 +17,8 @@
 
  implicit none
  private
- public:: physics_update_sst,         &
+ public:: physics_update_slab_ocean, &
+          physics_update_sst,         &
           physics_update_sstskin,     &
           physics_update_surface,     &
           physics_update_deepsoiltemp
@@ -109,6 +110,105 @@
  call monthly_min_max(nCellsSolve,greenfrac,shdmin,shdmax)
 
  end subroutine physics_update_surface
+
+!=================================================================================================================
+ subroutine physics_update_slab_ocean(dt,configs,mesh,diag_physics,sfc_input,slab_ocean)
+!=================================================================================================================
+! Step a slab ocean of fixed depth forward by one time step, driven by the net downward energy flux
+! at the surface, in place of a prescribed sea surface temperature.
+!
+!     rho_w * c_w * h * d(sst)/dt = swdnb - swupb + lwdnb - lwupb - hfx - lh
+!
+! There is no ocean heat transport and no freezing: the slab temperature is free to fall below the
+! freezing point of sea water, and nothing constrains it other than the surface energy budget.
+!
+! ENERGY CONSERVATION. This routine is called from physics_timetracker at the top of the time step,
+! before the physics drivers run, so every flux it reads is the value that the atmosphere and the
+! surface layer actually exchanged over the preceding step. Debiting the slab by exactly those
+! fluxes over exactly that dt therefore conserves energy to round-off: whatever the atmosphere
+! gained from the surface last step, the slab loses this step.
+!
+! Two consequences of that choice are worth stating plainly. First, no flux is recomputed here. In
+! particular lwupb was evaluated by the radiation scheme from the previous skin temperature, so the
+! slab's emission lags its own temperature by one radiation call; recomputing it from the new sst
+! would make the physics more current but would break the budget, which is not the trade we want.
+! Second, the scheme is only conservative if nothing else writes to sst, which is why enabling the
+! slab together with config_sst_update or config_sstdiurn_update is rejected in
+! physics_namelist_check.
+
+ implicit none
+
+!input arguments:
+ real(kind=RKIND),intent(in):: dt
+ type(mpas_pool_type),intent(in):: configs
+ type(mpas_pool_type),intent(in):: mesh
+
+!inout arguments:
+ type(mpas_pool_type),intent(inout):: diag_physics
+ type(mpas_pool_type),intent(inout):: sfc_input
+ type(mpas_pool_type),intent(inout):: slab_ocean
+
+!local pointers:
+ real(kind=RKIND),pointer:: config_slab_depth
+ real(kind=RKIND),pointer:: config_slab_albedo
+ integer,pointer:: nCellsSolve
+
+ integer,dimension(:),pointer:: landmask
+ real(kind=RKIND),dimension(:),pointer:: sst,tsk,sfc_albedo
+ real(kind=RKIND),dimension(:),pointer:: swdnb,swupb,lwdnb,lwupb,hfx,lh
+ real(kind=RKIND),dimension(:),pointer:: slab_energy_input
+
+!local variables:
+ real(kind=RKIND):: heat_capacity,flux_net
+ integer:: iCell
+
+!density and specific heat of sea water. Their product with the mixed layer depth is the heat
+!capacity of the slab per unit area.
+ real(kind=RKIND),parameter:: rho_water = 1000.0_RKIND    ! kg m^-3
+ real(kind=RKIND),parameter:: c_water   = 4181.0_RKIND    ! J kg^-1 K^-1
+
+!-----------------------------------------------------------------------------------------------------------------
+
+ call mpas_pool_get_config(configs,'config_slab_depth' ,config_slab_depth )
+ call mpas_pool_get_config(configs,'config_slab_albedo',config_slab_albedo)
+
+ call mpas_pool_get_dimension(mesh,'nCellsSolve',nCellsSolve)
+
+ call mpas_pool_get_array(sfc_input,'landmask',landmask)
+ call mpas_pool_get_array(sfc_input,'sst'     ,sst     )
+ call mpas_pool_get_array(sfc_input,'skintemp',tsk     )
+
+ call mpas_pool_get_array(diag_physics,'sfc_albedo',sfc_albedo)
+ call mpas_pool_get_array(diag_physics,'swdnb'     ,swdnb     )
+ call mpas_pool_get_array(diag_physics,'swupb'     ,swupb     )
+ call mpas_pool_get_array(diag_physics,'lwdnb'     ,lwdnb     )
+ call mpas_pool_get_array(diag_physics,'lwupb'     ,lwupb     )
+ call mpas_pool_get_array(diag_physics,'hfx'       ,hfx       )
+ call mpas_pool_get_array(diag_physics,'lh'        ,lh        )
+
+ call mpas_pool_get_array(slab_ocean,'slab_energy_input',slab_energy_input)
+
+ heat_capacity = rho_water * c_water * config_slab_depth
+
+ do iCell = 1, nCellsSolve
+    if(landmask(iCell) /= 0) cycle
+
+    !net downward energy flux into the ocean. hfx and lh are defined positive upward.
+    flux_net = swdnb(iCell) - swupb(iCell) + lwdnb(iCell) - lwupb(iCell) &
+               - hfx(iCell) - lh(iCell)
+
+    sst(iCell) = sst(iCell) + flux_net * dt / heat_capacity
+
+    !the surface schemes see the ocean through the skin temperature
+    tsk(iCell) = sst(iCell)
+
+    !hold the albedo fixed so that swupb stays consistent with swdnb
+    sfc_albedo(iCell) = config_slab_albedo
+
+    slab_energy_input(iCell) = slab_energy_input(iCell) + flux_net * dt
+ end do
+
+ end subroutine physics_update_slab_ocean
 
 !=================================================================================================================
  subroutine physics_update_sst(dminfo,config_frac_seaice,mesh,sfc_input,diag_physics)

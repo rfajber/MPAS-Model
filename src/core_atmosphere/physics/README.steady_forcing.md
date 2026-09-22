@@ -54,6 +54,28 @@ land-surface fields consistent. That is more preprocessing, but still no model
 code.
 
 
+## Slab ocean
+
+Instead of holding the SST fixed, the surface temperature can be made prognostic
+by a slab ocean of constant depth driven by the net surface energy flux:
+
+```
+&physics
+    config_slab_ocean  = true
+    config_slab_depth  = 2.5
+    config_slab_albedo = 0.07
+/
+```
+
+This replaces the prescribed SST above rather than supplementing it, and is
+incompatible with `config_sst_update`, which the model rejects at startup. The
+slab conserves energy exactly, per cell, and provides the diagnostics needed to
+verify that.
+
+See `README.slab_ocean.md` for the formulation, the conservation argument, the
+diagnostics and the limitations.
+
+
 ## What still varies in time
 
 Two further sources of time variation are **not** affected by

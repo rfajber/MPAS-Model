@@ -150,6 +150,7 @@
  logical,pointer:: config_frac_seaice,        &
                    config_o3climatology,      &
                    config_sfc_albedo,         &
+                   config_slab_ocean,         &
                    config_sst_update,         &
                    config_sstdiurn_update,    &
                    config_deepsoiltemp_update
@@ -168,6 +169,7 @@
  type(mpas_pool_type),pointer:: diag_physics
  type(mpas_pool_type),pointer:: sfc_input
  type(mpas_pool_type),pointer:: atm_input
+ type(mpas_pool_type),pointer:: slab_ocean
 
 !local variables:
 
@@ -195,6 +197,7 @@
  call mpas_pool_get_config(domain%blocklist%configs,'config_frac_seaice'        ,config_frac_seaice        )
  call mpas_pool_get_config(domain%blocklist%configs,'config_o3climatology'      ,config_o3climatology      )
  call mpas_pool_get_config(domain%blocklist%configs,'config_sfc_albedo'         ,config_sfc_albedo         )
+ call mpas_pool_get_config(domain%blocklist%configs,'config_slab_ocean'         ,config_slab_ocean         )
  call mpas_pool_get_config(domain%blocklist%configs,'config_sst_update'         ,config_sst_update         )
  call mpas_pool_get_config(domain%blocklist%configs,'config_sstdiurn_update'    ,config_sstdiurn_update    )
  call mpas_pool_get_config(domain%blocklist%configs,'config_deepsoiltemp_update',config_deepsoiltemp_update)
@@ -243,6 +246,12 @@
        if(config_sst_update) &
           call physics_update_sst(domain%dminfo,config_frac_seaice,mesh,sfc_input,diag_physics)
     endif   
+
+    !step the slab ocean forward using the surface fluxes exchanged over the previous time step:
+    if(config_slab_ocean) then
+       call mpas_pool_get_subpool(block%structs,'slab_ocean',slab_ocean)
+       call physics_update_slab_ocean(dt_dyn,block%configs,mesh,diag_physics,sfc_input,slab_ocean)
+    endif
 
     !apply a diurnal cycle to the sea-surface temperature:
     if(config_sstdiurn_update) &

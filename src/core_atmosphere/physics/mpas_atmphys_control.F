@@ -107,10 +107,17 @@
                                   config_radt_sw_scheme,    &
                                   config_sfclayer_scheme
 
+ logical,pointer:: config_slab_ocean,config_sst_update,config_sstdiurn_update
+ real(kind=RKIND),pointer:: config_slab_depth
+
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write('')
 !call mpas_log_write('--- enter subroutine physics_namelist_check:')
 
+ call mpas_pool_get_config(configs,'config_slab_ocean'       ,config_slab_ocean       )
+ call mpas_pool_get_config(configs,'config_slab_depth'       ,config_slab_depth       )
+ call mpas_pool_get_config(configs,'config_sst_update'       ,config_sst_update       )
+ call mpas_pool_get_config(configs,'config_sstdiurn_update'  ,config_sstdiurn_update  )
  call mpas_pool_get_config(configs,'config_physics_suite'    ,config_physics_suite    )
  call mpas_pool_get_config(configs,'config_microp_scheme'    ,config_microp_scheme    )
  call mpas_pool_get_config(configs,'config_convection_scheme',config_convection_scheme)
@@ -195,6 +202,30 @@
     write(mpas_err_message,'(A,A20)') 'illegal value for config_convection_scheme: ', &
           trim(config_convection_scheme)
     call physics_error_fatal(mpas_err_message)
+
+ endif
+
+!slab ocean. The slab conserves energy only because it is the sole writer of the sea surface
+!temperature, so any other option that also writes sst has to be rejected rather than silently
+!allowed to break the surface energy budget.
+ if(config_slab_ocean) then
+
+    if(config_sst_update) then
+       write(mpas_err_message,'(A)') 'config_slab_ocean = true requires config_sst_update = false: ' // &
+             'a prognostic slab ocean cannot also have its temperature overwritten from an input stream'
+       call physics_error_fatal(mpas_err_message)
+    endif
+
+    if(config_sstdiurn_update) then
+       write(mpas_err_message,'(A)') 'config_slab_ocean = true requires config_sstdiurn_update = false: ' // &
+             'the diurnal sea surface temperature adjustment would break the slab energy budget'
+       call physics_error_fatal(mpas_err_message)
+    endif
+
+    if(config_slab_depth <= 0._RKIND) then
+       write(mpas_err_message,'(A)') 'config_slab_depth must be positive when config_slab_ocean = true'
+       call physics_error_fatal(mpas_err_message)
+    endif
 
  endif
 
