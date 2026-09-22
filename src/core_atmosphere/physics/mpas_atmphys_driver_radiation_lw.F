@@ -822,6 +822,7 @@
 
 !local pointers:
  logical,pointer:: config_o3climatology
+ logical,pointer:: config_perpetual_equinox
  character(len=StrKIND),pointer:: radt_lw_scheme
  character(len=StrKIND),pointer:: radt_cld_overlap,radt_cld_dcorrlen
 
@@ -833,6 +834,7 @@
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write(' --- enter subroutine driver_radiation_lw: ')
 
+ call mpas_pool_get_config(configs,'config_perpetual_equinox',config_perpetual_equinox)
  call mpas_pool_get_config(configs,'config_o3climatology'    ,config_o3climatology)
  call mpas_pool_get_config(configs,'config_radt_lw_scheme'   ,radt_lw_scheme      )
  call mpas_pool_get_config(configs,'config_radt_cld_overlap' ,radt_cld_overlap    )
@@ -892,7 +894,7 @@
 ! are global variables in mpas_atmphys_vars.F and race conditions may occur otherwise!
 !$OMP SINGLE
        !... calculates solar declination:
-       call radconst(declin,solcon,curr_julday,degrad,dpd)
+       call radconst(declin,solcon,curr_julday,degrad,dpd,config_perpetual_equinox)
 !$OMP END SINGLE
 
 !... convert the radiation time_step to minutes:

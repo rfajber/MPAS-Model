@@ -855,6 +855,7 @@
 
 !local pointers:
  logical,pointer:: config_o3climatology
+ logical,pointer:: config_perpetual_equinox
  character(len=StrKIND),pointer:: radt_sw_scheme
  character(len=StrKIND),pointer:: radt_cld_overlap,radt_cld_dcorrlen
 
@@ -867,6 +868,7 @@
 !call mpas_log_write(' --- enter subroutine driver_radiation_sw: $i',intArgs=(/itimestep/))
 
  call mpas_pool_get_config(configs,'config_o3climatology' ,config_o3climatology   )
+ call mpas_pool_get_config(configs,'config_perpetual_equinox',config_perpetual_equinox)
  call mpas_pool_get_config(configs,'config_radt_sw_scheme',radt_sw_scheme         )
  call mpas_pool_get_config(configs,'config_radt_cld_overlap' ,radt_cld_overlap    )
  call mpas_pool_get_config(configs,'config_radt_cld_dcorrlen',radt_cld_dcorrlen   )
@@ -881,7 +883,7 @@
 !$OMP SINGLE
 !... calculates solar declination:
 !call radconst(declin,solcon,julday,degrad,dpd)
- call radconst(declin,solcon,curr_julday,degrad,dpd)
+ call radconst(declin,solcon,curr_julday,degrad,dpd,config_perpetual_equinox)
 !call mpas_log_write('     ITIMESTEP   = $i', intArgs=(/itimestep/))
 !call mpas_log_write('     YEAR        = $i', intArgs=(/year/))
 !call mpas_log_write('     JULDAY      = $i', intArgs=(/julday/))
@@ -1006,13 +1008,14 @@
  end subroutine driver_radiation_sw
 
 !=================================================================================================================
- subroutine radconst(declin,solcon,julian,degrad,dpd)
+ subroutine radconst(declin,solcon,julian,degrad,dpd,perpetual_equinox)
 !=================================================================================================================
 
 !input arguments:
 !integer,intent(in):: julian
  real(kind=RKIND),intent(in):: julian
  real(kind=RKIND),intent(in):: degrad,dpd
+ logical,intent(in):: perpetual_equinox
 
 !output arguments:
  real(kind=RKIND),intent(out):: declin,solcon
@@ -1024,6 +1027,16 @@
 
    declin=0.
    solcon=0.
+
+!equinoctial conditions on a circular orbit: a zero declination removes the seasonal cycle and a
+!unit eccentricity factor removes the annual variation in the Earth-Sun distance. The diurnal cycle
+!is carried by the hour angle in the radiation schemes and is unaffected.
+
+   if(perpetual_equinox) then
+      declin=0.
+      solcon=solcon_0
+      return
+   endif
 
 !obecl : obliquity = 23.5 degree.
         
