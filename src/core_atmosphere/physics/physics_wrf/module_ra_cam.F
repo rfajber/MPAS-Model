@@ -216,6 +216,7 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
                      RADT,DEGRAD,n_cldadv,                                  &
                      abstot_3d, absnxt_3d, emstot_3d,              &
                      doabsems,                                     &
+                     fixed_co2, co2vmr_fixed,                      &
                      ids,ide, jds,jde, kds,kde,                    &
                      ims,ime, jms,jme, kms,kme,                    &
                      its,ite, jts,jte, kts,kte                     )
@@ -236,6 +237,11 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
    LOGICAL,    INTENT(IN   ) ::        F_QC,F_QR,F_QI,F_QS
    LOGICAL,    INTENT(INout) ::        doabsems
    LOGICAL,    INTENT(IN   ) ::        dolw,dosw
+
+! optional override of the CO2 volume mixing ratio with a constant value. Both arguments must be
+! present for the override to take effect; when they are absent camrad follows its own scenario.
+   LOGICAL,    INTENT(IN   ), OPTIONAL :: fixed_co2
+   REAL,       INTENT(IN   ), OPTIONAL :: co2vmr_fixed
 
    INTEGER,    INTENT(IN  )  ::        n_cldadv
    INTEGER,    INTENT(IN  )  ::        JULDAY
@@ -406,6 +412,7 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
    real(r8), dimension(its:ite,kts:kte,4)           :: absnxt ! Total nearest layer absorptivity
    real(r8), dimension(its:ite,kts:kte+1)           :: emstot ! Total emissivity
    CHARACTER(LEN=256) :: msgstr
+   LOGICAL :: override_co2
 
 #if !defined(MAC_KLUDGE)
    lchnk = 1
@@ -442,6 +449,17 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
 
 
 ! update CO2 volume mixing ratio (co2vmr)
+
+   override_co2 = .false.
+   if(present(fixed_co2) .and. present(co2vmr_fixed)) override_co2 = fixed_co2
+
+   if(override_co2) then
+
+! hold CO2 at the constant value supplied by the caller, bypassing the scenario below.
+
+      co2vmr = co2vmr_fixed
+
+   else
   
 ! determine time interpolation factors, check sanity
 ! of interpolation factors to within 32-bit roundoff
@@ -456,6 +474,8 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
    fact1    = (doydatap - doymodel)/deltat
    fact2    = (doymodel - doydatam)/deltat
    co2vmr = (co2(nyrm)*fact1 + co2(nyrp)*fact2)*1.e-06
+
+   endif
 
    co2mmr=co2vmr*mwco2/mwdry
 !

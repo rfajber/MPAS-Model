@@ -108,7 +108,9 @@
                                   config_sfclayer_scheme
 
  logical,pointer:: config_slab_ocean,config_sst_update,config_sstdiurn_update
+ logical,pointer:: config_fixed_co2
  real(kind=RKIND),pointer:: config_slab_depth
+ real(kind=RKIND),pointer:: config_co2vmr
 
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write('')
@@ -116,6 +118,8 @@
 
  call mpas_pool_get_config(configs,'config_slab_ocean'       ,config_slab_ocean       )
  call mpas_pool_get_config(configs,'config_slab_depth'       ,config_slab_depth       )
+ call mpas_pool_get_config(configs,'config_fixed_co2'        ,config_fixed_co2        )
+ call mpas_pool_get_config(configs,'config_co2vmr'           ,config_co2vmr           )
  call mpas_pool_get_config(configs,'config_sst_update'       ,config_sst_update       )
  call mpas_pool_get_config(configs,'config_sstdiurn_update'  ,config_sstdiurn_update  )
  call mpas_pool_get_config(configs,'config_physics_suite'    ,config_physics_suite    )
@@ -227,6 +231,12 @@
        call physics_error_fatal(mpas_err_message)
     endif
 
+ endif
+
+!carbon dioxide concentration:
+ if(config_fixed_co2 .and. config_co2vmr <= 0._RKIND) then
+    write(mpas_err_message,'(A)') 'config_co2vmr must be positive when config_fixed_co2 = true'
+    call physics_error_fatal(mpas_err_message)
  endif
 
 !pbl scheme:

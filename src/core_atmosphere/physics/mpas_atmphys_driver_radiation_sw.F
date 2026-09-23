@@ -856,6 +856,8 @@
 !local pointers:
  logical,pointer:: config_o3climatology
  logical,pointer:: config_perpetual_equinox
+ logical,pointer:: config_fixed_co2
+ real(kind=RKIND),pointer:: config_co2vmr
  character(len=StrKIND),pointer:: radt_sw_scheme
  character(len=StrKIND),pointer:: radt_cld_overlap,radt_cld_dcorrlen
 
@@ -869,6 +871,8 @@
 
  call mpas_pool_get_config(configs,'config_o3climatology' ,config_o3climatology   )
  call mpas_pool_get_config(configs,'config_perpetual_equinox',config_perpetual_equinox)
+ call mpas_pool_get_config(configs,'config_fixed_co2'     ,config_fixed_co2       )
+ call mpas_pool_get_config(configs,'config_co2vmr'        ,config_co2vmr          )
  call mpas_pool_get_config(configs,'config_radt_sw_scheme',radt_sw_scheme         )
  call mpas_pool_get_config(configs,'config_radt_cld_overlap' ,radt_cld_overlap    )
  call mpas_pool_get_config(configs,'config_radt_cld_dcorrlen',radt_cld_dcorrlen   )
@@ -940,6 +944,7 @@
               swdnt      = swdnt_p       , swdntc   = swdntc_p    , swupb      = swupb_p      , &
               swupbc     = swupbc_p      , swdnb    = swdnb_p     , swdnbc     = swdnbc_p     , &
               swddir     = swddir_p      , swddni   = swddni_p    , swddif     = swddif_p     , &
+              fixed_co2  = config_fixed_co2 , co2vmr_fixed = config_co2vmr ,                    &
               ids = ids , ide = ide , jds = jds , jde = jde , kds = kds , kde = kde ,           &
               ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme ,           &
               its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte             &
@@ -990,7 +995,8 @@
                 radt          = radt          , degrad        = degrad        ,              &
                 n_cldadv      = 3             , abstot_3d     = abstot_p      ,              &
                 absnxt_3d     = absnxt_p      , emstot_3d     = emstot_p      ,              &
-                doabsems      = doabsems      ,                                              &
+                doabsems      = doabsems      , fixed_co2     = config_fixed_co2,            &
+                co2vmr_fixed  = config_co2vmr ,                                              &
                 ids = ids , ide = ide , jds = jds , jde = jde , kds = kds , kde = kde ,      &
                 ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme ,      &
                 its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte        &

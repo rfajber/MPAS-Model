@@ -76,11 +76,47 @@ See `README.slab_ocean.md` for the formulation, the conservation argument, the
 diagnostics and the limitations.
 
 
+## Carbon dioxide
+
+```
+&physics
+    config_fixed_co2 = true
+    config_co2vmr    = 348.0e-6
+/
+```
+
+`config_co2vmr` is a volume mixing ratio, so the value above is 348 ppmv; set
+whatever your protocol calls for. The option is ignored unless
+`config_fixed_co2` is true, and the model stops at startup if it is true and the
+value is not positive.
+
+This matters more than it first appears, because the two radiation schemes
+disagree about CO2 and only one of them is steady:
+
+* **CAM** (`config_radt_lw_scheme = 'cam_lw'`, `cam_sw`) interpolates an SRES A2
+  scenario table in the model year, in `camrad`. CO2 therefore drifts upward as
+  a run proceeds, spanning 289 ppmv in 1869 to 829 ppmv in 2100. For a long
+  integration under nominally steady forcing this is a real trend, not a
+  rounding detail. The table is also indexed without bounds checking, so a model
+  year outside 1869-2101 reads past the end of the array.
+* **RRTMG** (`rrtmg_lw`, `rrtmg_sw`) hardcodes 379 ppmv, the 2005 IPCC value, in
+  a `data` statement inside `rrtmg_lwrad` and `rrtmg_swrad`. It is already
+  steady, but it was not adjustable before this option.
+
+Setting `config_fixed_co2 = true` replaces both: the scenario interpolation is
+bypassed in CAM, and the hardcoded constant is overridden in RRTMG. One value
+then applies whichever scheme is selected.
+
+Like the other options here, both are declared `in_defaults="false"` and must be
+added to `&physics` by hand. The default when `config_fixed_co2` is false is
+unchanged behaviour in each scheme.
+
+
 ## What still varies in time
 
 Two further sources of time variation are **not** affected by
-`config_perpetual_equinox`, and both need attention for a genuinely steady
-forcing:
+`config_perpetual_equinox` or `config_fixed_co2`, and both need attention for a
+genuinely steady forcing:
 
 * **Ozone.** `config_o3climatology` defaults to `.true.`, which applies a
   monthly-varying ozone climatology. Set it to `.false.` to use a fixed vertical
@@ -101,5 +137,7 @@ if you need exact APE compliance, and be aware of the side effects.
 
 ## Status
 
-The `config_perpetual_equinox` option has not been exercised in a simulation.
-The change it makes is small and confined to `radconst`, but it has not been run.
+Neither `config_perpetual_equinox` nor `config_fixed_co2` has been exercised in
+a simulation. Both changes are small and confined -- `radconst` for the first,
+the CO2 assignment in each radiation scheme for the second -- but neither has
+been run.

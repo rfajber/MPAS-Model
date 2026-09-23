@@ -2384,6 +2384,16 @@
                      description="logical for holding the insolation at equinoctial conditions on a circular orbit, removing the seasonal cycle while retaining the diurnal cycle, as in aquaplanet experiments"
                      possible_values=".true. for fixed equinoctial insolation; .false. for the usual seasonally varying insolation"/>
 
+                <nml_option name="config_fixed_co2" type="logical" default_value="false" in_defaults="false"
+                     units="-"
+                     description="logical for overriding the carbon dioxide concentration used by the radiation schemes with the constant value given by config_co2vmr"
+                     possible_values=".true. for a constant carbon dioxide concentration; .false. for the concentration built into the selected radiation scheme"/>
+
+                <nml_option name="config_co2vmr" type="real" default_value="379.0e-6" in_defaults="false"
+                     units="mol mol^{-1}"
+                     description="carbon dioxide volume mixing ratio used by the long- and short-wave radiation schemes when config_fixed_co2 is true; ignored otherwise"
+                     possible_values="Positive real values"/>
+
                 <nml_option name="config_slab_ocean" type="logical" default_value="false" in_defaults="false"
                      units="-"
                      description="logical for making the sea surface temperature prognostic through a slab ocean of fixed depth, driven by the net surface energy flux, in place of a prescribed sea surface temperature"

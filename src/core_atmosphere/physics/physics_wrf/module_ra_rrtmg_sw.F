@@ -10037,6 +10037,7 @@ CONTAINS
                        swupb,swupbc,swdnb,swdnbc,                      &
                        swupflx, swupflxc, swdnflx, swdnflxc,           &
                        swddir,swddni,swddif,                           &
+                       fixed_co2,co2vmr_fixed,                         &
                        ids,ide, jds,jde, kds,kde,                      & 
                        ims,ime, jms,jme, kms,kme,                      &
                        its,ite, jts,jte, kts,kte                       &
@@ -10054,6 +10055,11 @@ CONTAINS
  integer,intent(in):: icloud,cldovrlp,idcor
  integer,intent(in):: has_reqc,has_reqi,has_reqs
  integer,intent(in),optional:: o3input
+
+!--- optional override of the CO2 volume mixing ratio with a constant value. Both arguments must be
+!    present for the override to take effect; when they are absent the IPCC value set below is used.
+ logical,intent(in),optional:: fixed_co2
+ real,intent(in),optional:: co2vmr_fixed
 
  real,intent(in):: radt,degrad,xtime,declin,solcon,gmt
  real,intent(in),dimension(ims:ime,jms:jme):: xlat,xlong
@@ -10143,6 +10149,8 @@ CONTAINS
 !carbon dioxide (379 ppmv)
  real :: co2
  data co2 / 379.e-6 / 
+!carbon dioxide actually passed to the radiation, equal to co2 unless the caller overrides it:
+ real :: co2rad
 !methane (1774 ppbv)
  real :: ch4
  data ch4 / 1774.e-9 / 
@@ -10188,6 +10196,13 @@ CONTAINS
 
 !--- initialize option for the calculation of clean air upward and downward fluxes:
  calc_clean_atm_diag = 0
+
+!--- the CO2 volume mixing ratio is the IPCC value set above unless the caller asks for a constant
+!    value of its own:
+ co2rad = co2
+ if(present(fixed_co2) .and. present(co2vmr_fixed)) then
+    if(fixed_co2) co2rad = co2vmr_fixed
+ endif
 
 !--- latitude loop:
  j_loop: do j = jts,jte
@@ -10334,7 +10349,7 @@ CONTAINS
              pdel(ncol,k)     = plev(ncol,k) - plev(ncol,k+1)
              tlay(ncol,k)     = t1d(k)
              h2ovmr(ncol,k)   = qv1d(k) * amdw
-             co2vmr(ncol,k)   = co2
+             co2vmr(ncol,k)   = co2rad
              o2vmr(ncol,k)    = o2
              ch4vmr(ncol,k)   = ch4
              n2ovmr(ncol,k)   = n2o
