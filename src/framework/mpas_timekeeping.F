@@ -12,11 +12,12 @@ module mpas_timekeeping
    use mpas_dmpar
    use mpas_threading
    use mpas_log
-   use mpas_string_utils, only : mpas_split_string
+   use mpas_string_utils, only : mpas_split_string, mpas_strip_whitespace
 
    use ESMF
 
    private :: mpas_calibrate_alarms
+   private :: mpas_report_bad_datetime
    private :: mpas_in_ringing_envelope
 
    integer :: TheCalendar 
@@ -1160,6 +1161,7 @@ module mpas_timekeeping
       integer, parameter :: integerMaxDigits = 8
       integer :: year, month, day, hour, min, sec
       integer :: numerator, denominator, denominatorPower
+      integer :: readErr
 
       character (len=StrKIND) :: dateTimeString_
       character (len=StrKIND) :: dateSubString
@@ -1169,7 +1171,17 @@ module mpas_timekeeping
 
       if (present(dateTimeString)) then
 
-         dateTimeString_ = dateTimeString
+         !
+         ! Remove any whitespace before the string is parsed.
+         !
+         ! The string is split on '.', '_', ':' and '-' and the pieces are read as
+         ! integers, and mpas_split_string trims only trailing blanks. A leading
+         ! space, a tab, a carriage return from a file that has been through a DOS
+         ! editor, or the NUL padding that a netCDF character variable such as
+         ! 'xtime' can carry all survive that trim and are carried into the parse,
+         ! where they cause either a failure or a silently wrong time.
+         !
+         dateTimeString_ = mpas_strip_whitespace(dateTimeString)
          numerator = 0
          denominator = 1
 
@@ -1188,7 +1200,9 @@ module mpas_timekeeping
          else if (size(subStrings) /= 1) then
             deallocate(subStrings)
             if (present(ierr)) ierr = 1
-            call mpas_log_write('Invalid DateTime string ' // dateTimeString, MPAS_LOG_ERR)
+            call mpas_log_write('Invalid DateTime string (too many ''.'' separators) ['//trim(dateTimeString_)//']', &
+                                MPAS_LOG_ERR)
+            call mpas_report_bad_datetime(dateTimeString)
             return
          else
             deallocate(subStrings)
@@ -1204,14 +1218,24 @@ module mpas_timekeeping
             call mpas_split_string(timeSubString, ":", subStrings)
             
             if (size(subStrings) == 3) then
-               read(subStrings(1),*) hour 
-               read(subStrings(2),*) min 
-               read(subStrings(3),*) sec 
+               readErr = 0
+               read(subStrings(1),*,iostat=readErr) hour
+               if (readErr == 0) read(subStrings(2),*,iostat=readErr) min
+               if (readErr == 0) read(subStrings(3),*,iostat=readErr) sec
                deallocate(subStrings)
+               if (readErr /= 0) then
+                  if (present(ierr)) ierr = 1
+                  call mpas_log_write('Invalid DateTime string (hh:mm:ss are not all numbers) ['// &
+                                      trim(dateTimeString_)//']', MPAS_LOG_ERR)
+                  call mpas_report_bad_datetime(dateTimeString)
+                  return
+               end if
             else
                deallocate(subStrings)
                if (present(ierr)) ierr = 1
-               call mpas_log_write('Invalid DateTime string (invalid time substring) ' // dateTimeString, MPAS_LOG_ERR)
+               call mpas_log_write('Invalid DateTime string (invalid time substring) ['//trim(dateTimeString_)//']', &
+                                   MPAS_LOG_ERR)
+               call mpas_report_bad_datetime(dateTimeString)
                return
             end if
 
@@ -1226,21 +1250,33 @@ module mpas_timekeeping
          else
             deallocate(subStrings)
             if (present(ierr)) ierr = 1
-            call mpas_log_write('Invalid DateTime string' // dateTimeString, MPAS_LOG_ERR)
+            call mpas_log_write('Invalid DateTime string (too many ''_'' separators) ['//trim(dateTimeString_)//']', &
+                                MPAS_LOG_ERR)
+            call mpas_report_bad_datetime(dateTimeString)
             return
          end if
 
          call mpas_split_string(dateSubString, "-", subStrings)
             
          if (size(subStrings) == 3) then
-            read(subStrings(1),*) year 
-            read(subStrings(2),*) month
-            read(subStrings(3),*) day
+            readErr = 0
+            read(subStrings(1),*,iostat=readErr) year
+            if (readErr == 0) read(subStrings(2),*,iostat=readErr) month
+            if (readErr == 0) read(subStrings(3),*,iostat=readErr) day
             deallocate(subStrings)
+            if (readErr /= 0) then
+               if (present(ierr)) ierr = 1
+               call mpas_log_write('Invalid DateTime string (YYYY-MM-DD are not all numbers) ['// &
+                                   trim(dateTimeString_)//']', MPAS_LOG_ERR)
+               call mpas_report_bad_datetime(dateTimeString)
+               return
+            end if
          else
             deallocate(subStrings)
             if (present(ierr)) ierr = 1
-            call mpas_log_write('Invalid DateTime string (invalid date substring) ' // dateTimeString, MPAS_LOG_ERR)
+            call mpas_log_write('Invalid DateTime string (invalid date substring) ['//trim(dateTimeString_)//']', &
+                                MPAS_LOG_ERR)
+            call mpas_report_bad_datetime(dateTimeString)
             return
          end if
 
@@ -1296,6 +1332,48 @@ module mpas_timekeeping
       end if
 
    end subroutine mpas_set_time
+
+
+!***********************************************************************
+!
+!  routine mpas_report_bad_datetime
+!
+!> \brief   Writes the string that could not be parsed as a date and time
+!> \details Reports the string exactly as it was handed to mpas_set_time,
+!>          together with its length and the position and character code of
+!>          any character that is not printable ASCII. A stray carriage
+!>          return, tab or NUL is invisible in the log on its own, so the
+!>          character codes are what identify it.
+!
+!-----------------------------------------------------------------------
+   subroutine mpas_report_bad_datetime(dateTimeString)
+
+      implicit none
+
+      character (len=*), intent(in) :: dateTimeString
+
+      integer :: i, ic, nBad
+
+      call mpas_log_write('   the string as given was ['//trim(dateTimeString)//'] with $i characters', &
+                          MPAS_LOG_ERR, intArgs=(/len_trim(dateTimeString)/))
+      call mpas_log_write('   a date and time is expected in the form YYYY-MM-DD_hh:mm:ss', MPAS_LOG_ERR)
+
+      nBad = 0
+      do i = 1, len_trim(dateTimeString)
+         ic = iachar(dateTimeString(i:i))
+         if (ic < 32 .or. ic > 126) then
+            nBad = nBad + 1
+            call mpas_log_write('   character $i is not printable: ASCII code $i', &
+                                MPAS_LOG_ERR, intArgs=(/i, ic/))
+         end if
+      end do
+
+      if (nBad > 0) then
+         call mpas_log_write('   the string contains $i non-printable characters; check the file or '// &
+                             'namelist it came from', MPAS_LOG_ERR, intArgs=(/nBad/))
+      end if
+
+   end subroutine mpas_report_bad_datetime
 
 
    subroutine mpas_get_time(curr_time, YYYY, MM, DD, DoY, H, M, S, S_n, S_d, dateTimeString, ierr)
@@ -1473,7 +1551,10 @@ module mpas_timekeeping
             write(fmtString, '(a,i2.2,a,i2.2,a)') '(a,f', iwidth, '.', idecimals, ')'
             write(timeString_,trim(fmtString)) '00:00:', dt
          else
-            timeString_ = timeString
+            ! As in mpas_set_time, remove whitespace that trim() would leave in
+            ! place -- tab, carriage return, NUL -- before the string is split
+            ! and its pieces are read as integers.
+            timeString_ = mpas_strip_whitespace(timeString)
          end if
 
          numerator = 0
@@ -1496,7 +1577,7 @@ module mpas_timekeeping
          else if (size(subStrings) /= 1) then
             deallocate(subStrings)
             if (present(ierr)) ierr = 1
-            call mpas_log_write('Invalid TimeInterval string ' // trim(timeString), MPAS_LOG_ERR)
+            call mpas_log_write('Invalid TimeInterval string ['//trim(timeString_)//']', MPAS_LOG_ERR)
             return
          else ! no second decimals are present - do nothing here
             deallocate(subStrings)
@@ -1527,7 +1608,7 @@ module mpas_timekeeping
                year = 0
                month = 0
                day = 0
-               !call mpas_log_write('Invalid TimeInterval string ' // trim(timeString), MPAS_LOG_ERR)
+               !call mpas_log_write('Invalid TimeInterval string ['//trim(timeString_)//']', MPAS_LOG_ERR)
             end if
 
             deallocate(subStrings)
@@ -1540,7 +1621,7 @@ module mpas_timekeeping
          else
             deallocate(subStrings)
             if (present(ierr)) ierr = 1
-            call mpas_log_write('Invalid TimeInterval string ' // trim(timeString), MPAS_LOG_ERR)
+            call mpas_log_write('Invalid TimeInterval string ['//trim(timeString_)//']', MPAS_LOG_ERR)
             return
          end if
 
@@ -1564,7 +1645,8 @@ module mpas_timekeeping
          else
             deallocate(subStrings)
             if (present(ierr)) ierr = 1
-            call mpas_log_write('Invalid TimeInterval string (invalid time substring) ' // trim(timeString), MPAS_LOG_ERR)
+            call mpas_log_write('Invalid TimeInterval string (invalid time substring) ['//trim(timeString_)//']', &
+                                MPAS_LOG_ERR)
             return
          end if
 

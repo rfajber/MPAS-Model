@@ -134,6 +134,7 @@ module mpas_atm_boundaries
         character(len=StrKIND) :: read_time
         integer :: iEdge, iCell, k, j
         integer :: cell1, cell2
+        integer :: timeErr
 
 
         ierr = 0
@@ -164,7 +165,20 @@ module mpas_atm_boundaries
            return
         end if
 
-        call mpas_set_time(currTime, dateTimeString=trim(read_time))
+        !
+        ! The time stamp comes from the 'xtime' variable of the record that was just
+        ! read, so a file whose 'xtime' is blank or malformed shows up here rather
+        ! than at the read itself.
+        !
+        call mpas_set_time(currTime, dateTimeString=trim(read_time), ierr=timeErr)
+        if (timeErr /= 0) then
+            call mpas_log_write('The time stamp read from the ''lbc_in'' stream, ['//trim(read_time)//'], '// &
+                                'could not be interpreted.', messageType=MPAS_LOG_ERR)
+            call mpas_log_write('Check the ''xtime'' variable in the file that the ''lbc_in'' stream '// &
+                                'is reading.', messageType=MPAS_LOG_ERR)
+            ierr = 1
+            return
+        end if
 
         !
         ! Compute any derived fields from those that were read from the lbc_in stream
