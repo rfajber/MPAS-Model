@@ -99,20 +99,31 @@ must hold to round-off. Both fields are written to the `output` stream. Note tha
 ## Diagnostics
 
 `slab_energy_input` (J m^-2) is the only new field. The six terms that drive it
-are all written to the `output` stream when the slab is active, so a drift can be
-attributed rather than merely observed:
+are all written to the `output` stream, so a drift can be attributed rather than
+merely observed:
 
-| Term | Sign | Output by default? |
-| --- | --- | --- |
-| `swdnb` | + | only with the slab active |
-| `swupb` | − | only with the slab active |
-| `lwdnb` | + | only with the slab active |
-| `lwupb` | − | only with the slab active |
-| `hfx` | − | always |
-| `lh` | − | always |
+| Term | Sign |
+| --- | --- |
+| `swdnb` | + |
+| `swupb` | − |
+| `lwdnb` | + |
+| `lwupb` | − |
+| `hfx` | − |
+| `lh` | − |
 
-The four radiative terms are gated on the `slab_ocean` package so that runs
-without the slab carry no extra output volume.
+`hfx` and `lh` were already in the `output` stream; the four radiative terms were
+added for the slab. They are written by every run, not only slab runs. That is
+deliberate rather than an oversight: the `output` stream is declared with
+`runtime_format="separate_file"`, so its variable list is generated as bare names
+in `stream_list.atmosphere.output`, a format with nowhere to record a package.
+A `packages` attribute on a `<var>` in that stream is dropped by `streams_gen`
+with a build-time warning and the field is listed anyway, so gating them there
+would have been an illusion. Four extra 2-d fields is small against the 3-d
+fields the stream already carries.
+
+`slab_energy_input` is different: it belongs to the `slab_ocean` var_struct, so
+the *field* is gated. Without the slab it is never activated and the stream
+manager skips it, whatever the stream list says.
 
 There is no domain-integrated energy budget, and the net flux itself is formed
 inside the update and not retained. For a global budget, integrate

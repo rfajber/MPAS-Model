@@ -1102,15 +1102,23 @@
 			<var name="snow"/>
 			<var name="snowh"/>
 			<var name="sst"/>
-			<var name="slab_energy_input" packages="slab_ocean"/>
-			<!-- the four radiative terms of the slab ocean surface energy budget. hfx and lh
-			     are already output above; these complete the budget so that a drift in
-			     slab_energy_input can be attributed. Gated on the slab so that runs without
-			     it are unaffected. -->
-			<var name="swdnb" packages="slab_ocean"/>
-			<var name="swupb" packages="slab_ocean"/>
-			<var name="lwdnb" packages="slab_ocean"/>
-			<var name="lwupb" packages="slab_ocean"/>
+			<!-- slab_energy_input needs no packages attribute here: the field itself belongs to
+			     the slab_ocean var_struct, so it is inactive and skipped on output whenever the
+			     slab is off.
+
+			     The four radiative terms below complete the slab ocean surface energy budget;
+			     hfx and lh are already output above. A drift in slab_energy_input can then be
+			     attributed rather than merely observed. They are NOT gated on the slab: this
+			     stream has runtime_format="separate_file", so streams_gen writes its var list as
+			     bare names in stream_list.atmosphere.output, which has nowhere to record a
+			     package. A packages attribute on a var here is silently dropped with a build-time
+			     warning, leaving the field in the list anyway, so these four are written by every
+			     run. That is four 2-d fields against the 3-d fields already in this stream. -->
+			<var name="slab_energy_input"/>
+			<var name="swdnb"/>
+			<var name="swupb"/>
+			<var name="lwdnb"/>
+			<var name="lwupb"/>
 			<var name="vegfra"/>
 			<var name="xice"/>
 			<var name="sh2o"/>
