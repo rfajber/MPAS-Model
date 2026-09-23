@@ -111,6 +111,8 @@
  logical,pointer:: config_fixed_co2
  real(kind=RKIND),pointer:: config_slab_depth
  real(kind=RKIND),pointer:: config_co2vmr
+ real(kind=RKIND),pointer:: config_perpetual_julday
+ logical,pointer:: config_perpetual_all_physics
 
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write('')
@@ -120,6 +122,8 @@
  call mpas_pool_get_config(configs,'config_slab_depth'       ,config_slab_depth       )
  call mpas_pool_get_config(configs,'config_fixed_co2'        ,config_fixed_co2        )
  call mpas_pool_get_config(configs,'config_co2vmr'           ,config_co2vmr           )
+ call mpas_pool_get_config(configs,'config_perpetual_julday' ,config_perpetual_julday )
+ call mpas_pool_get_config(configs,'config_perpetual_all_physics',config_perpetual_all_physics)
  call mpas_pool_get_config(configs,'config_sst_update'       ,config_sst_update       )
  call mpas_pool_get_config(configs,'config_sstdiurn_update'  ,config_sstdiurn_update  )
  call mpas_pool_get_config(configs,'config_physics_suite'    ,config_physics_suite    )
@@ -236,6 +240,21 @@
 !carbon dioxide concentration:
  if(config_fixed_co2 .and. config_co2vmr <= 0._RKIND) then
     write(mpas_err_message,'(A)') 'config_co2vmr must be positive when config_fixed_co2 = true'
+    call physics_error_fatal(mpas_err_message)
+ endif
+
+!a non-positive config_perpetual_julday means the seasonal cycle is retained, so only the upper
+!bound needs checking. The declination and eccentricity formulae are written for a day of the year.
+ if(config_perpetual_julday >= 367._RKIND) then
+    write(mpas_err_message,'(A)') 'config_perpetual_julday must be a day of the year, less than 367.'
+    call physics_error_fatal(mpas_err_message)
+ endif
+
+!config_perpetual_all_physics only extends the frozen date; on its own there is nothing to freeze,
+!so asking for it without a day is a configuration error rather than a silent no-op.
+ if(config_perpetual_all_physics .and. config_perpetual_julday <= 0._RKIND) then
+    write(mpas_err_message,'(A)') &
+       'config_perpetual_all_physics requires a positive config_perpetual_julday'
     call physics_error_fatal(mpas_err_message)
  endif
 

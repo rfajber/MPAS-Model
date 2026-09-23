@@ -855,7 +855,7 @@
 
 !local pointers:
  logical,pointer:: config_o3climatology
- logical,pointer:: config_perpetual_equinox
+ real(kind=RKIND),pointer:: config_perpetual_julday
  logical,pointer:: config_fixed_co2
  real(kind=RKIND),pointer:: config_co2vmr
  character(len=StrKIND),pointer:: radt_sw_scheme
@@ -870,7 +870,7 @@
 !call mpas_log_write(' --- enter subroutine driver_radiation_sw: $i',intArgs=(/itimestep/))
 
  call mpas_pool_get_config(configs,'config_o3climatology' ,config_o3climatology   )
- call mpas_pool_get_config(configs,'config_perpetual_equinox',config_perpetual_equinox)
+ call mpas_pool_get_config(configs,'config_perpetual_julday',config_perpetual_julday)
  call mpas_pool_get_config(configs,'config_fixed_co2'     ,config_fixed_co2       )
  call mpas_pool_get_config(configs,'config_co2vmr'        ,config_co2vmr          )
  call mpas_pool_get_config(configs,'config_radt_sw_scheme',radt_sw_scheme         )
@@ -887,7 +887,7 @@
 !$OMP SINGLE
 !... calculates solar declination:
 !call radconst(declin,solcon,julday,degrad,dpd)
- call radconst(declin,solcon,curr_julday,degrad,dpd,config_perpetual_equinox)
+ call radconst(declin,solcon,curr_julday,degrad,dpd,config_perpetual_julday)
 !call mpas_log_write('     ITIMESTEP   = $i', intArgs=(/itimestep/))
 !call mpas_log_write('     YEAR        = $i', intArgs=(/year/))
 !call mpas_log_write('     JULDAY      = $i', intArgs=(/julday/))
@@ -996,7 +996,7 @@
                 n_cldadv      = 3             , abstot_3d     = abstot_p      ,              &
                 absnxt_3d     = absnxt_p      , emstot_3d     = emstot_p      ,              &
                 doabsems      = doabsems      , fixed_co2     = config_fixed_co2,            &
-                co2vmr_fixed  = config_co2vmr ,                                              &
+                co2vmr_fixed  = config_co2vmr , julian_ozn    = config_perpetual_julday ,    &
                 ids = ids , ide = ide , jds = jds , jde = jde , kds = kds , kde = kde ,      &
                 ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme ,      &
                 its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte        &
@@ -1014,35 +1014,37 @@
  end subroutine driver_radiation_sw
 
 !=================================================================================================================
- subroutine radconst(declin,solcon,julian,degrad,dpd,perpetual_equinox)
+ subroutine radconst(declin,solcon,julian,degrad,dpd,perpetual_julday)
 !=================================================================================================================
 
 !input arguments:
 !integer,intent(in):: julian
  real(kind=RKIND),intent(in):: julian
  real(kind=RKIND),intent(in):: degrad,dpd
- logical,intent(in):: perpetual_equinox
+ real(kind=RKIND),intent(in):: perpetual_julday
 
 !output arguments:
  real(kind=RKIND),intent(out):: declin,solcon
 
 !local variables:
  real(kind=RKIND):: obecl,sinob,sxlong,arg,decdeg,djul,rjul,eccfac
+ real(kind=RKIND):: julian_use
 
 !-----------------------------------------------------------------------------------------------------------------
 
    declin=0.
    solcon=0.
 
-!equinoctial conditions on a circular orbit: a zero declination removes the seasonal cycle and a
-!unit eccentricity factor removes the annual variation in the Earth-Sun distance. The diurnal cycle
-!is carried by the hour angle in the radiation schemes and is unaffected.
+!a positive perpetual_julday holds the insolation at that day of the year. Both the solar
+!declination and the Earth-Sun distance are evaluated there instead of at the current model day,
+!and then never advance, so the seasonal cycle is removed while the orbit remains the real one:
+!the obliquity and the eccentricity are untouched, only the date is frozen. The diurnal cycle is
+!carried by the hour angle inside the radiation schemes and is unaffected.
+!
+!perpetual_julday = 80. is the vernal equinox, where sxlong and hence the declination are zero.
 
-   if(perpetual_equinox) then
-      declin=0.
-      solcon=solcon_0
-      return
-   endif
+   julian_use=julian
+   if(perpetual_julday .gt. 0.) julian_use=perpetual_julday
 
 !obecl : obliquity = 23.5 degree.
         
@@ -1051,8 +1053,8 @@
         
 !calculate longitude of the sun from vernal equinox:        
 
-   if(julian.ge.80.)sxlong=dpd*(julian-80.)
-   if(julian.lt.80.)sxlong=dpd*(julian+285.)
+   if(julian_use.ge.80.)sxlong=dpd*(julian_use-80.)
+   if(julian_use.lt.80.)sxlong=dpd*(julian_use+285.)
    sxlong=sxlong*degrad
    arg=sinob*sin(sxlong)
    declin=asin(arg)
@@ -1060,7 +1062,7 @@
 
 !solar constant eccentricity factor (paltridge and platt 1976)
 
-   djul=julian*360./365.
+   djul=julian_use*360./365.
    rjul=djul*degrad
    eccfac=1.000110+0.034221*cos(rjul)+0.001280*sin(rjul)+0.000719*  &
           cos(2*rjul)+0.000077*sin(2*rjul)

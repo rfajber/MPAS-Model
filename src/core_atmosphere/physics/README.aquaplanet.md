@@ -123,8 +123,8 @@ from the first step.
     config_slab_depth        = 2.5
     config_slab_albedo       = 0.07
 
-    config_perpetual_equinox = true
-    config_o3climatology     = false
+    config_perpetual_julday  = 80.
+    config_perpetual_all_physics = true
 
     config_sst_update        = false
     config_sstdiurn_update   = false
@@ -139,9 +139,19 @@ Notes on the choices:
 * `config_lsm_scheme = 'off'` because there is no land. The **surface layer
   scheme must stay on** — it produces `hfx` and `lh`, without which the slab has
   no turbulent fluxes and will only respond to radiation.
-* `config_o3climatology = false` switches to a fixed vertical ozone profile.
-  Leaving it true reintroduces a seasonal cycle through the ozone field, which
-  defeats the point of the fixed insolation.
+* `config_perpetual_julday = 80.` holds the insolation at the vernal equinox,
+  where the declination is zero. The date is frozen rather than the orbit
+  flattened, so any day of the year will do if you want a perpetual solstice
+  instead; see `README.steady_forcing.md`. The diurnal cycle is retained either
+  way.
+* **`config_o3climatology` can be left alone.** The same locked day is used for
+  the ozone climatology, so ozone no longer carries a seasonal cycle either.
+  Keeping the climatology on is preferable to switching it off, which would
+  replace the latitude-dependent distribution with a single fixed profile.
+* `config_perpetual_all_physics = true` extends the frozen date to the deep soil
+  temperature, the gravity-wave drag and Noah-MP. On an aquaplanet only the
+  gravity-wave source actually matters, since there is no land, but it is the one
+  remaining annual cycle in the physics.
 * `config_sst_update` and `config_sstdiurn_update` must both be false. The model
   rejects either in combination with the slab at startup, because both would
   write `sst` behind the slab's back and break its energy budget.
@@ -226,7 +236,7 @@ Two things to watch in the first weeks:
 | Vertical levels follow terrain that should not exist | `ter` was zeroed after the vertical grid stage rather than before |
 | Ocean has land-like roughness or albedo | `ivgtyp` was not set to the water category |
 | Slab responds only to radiation, never to weather | the surface layer scheme is off, so `hfx` and `lh` are zero |
-| Seasonal cycle persists despite fixed insolation | `config_o3climatology` is still true |
+| Seasonal cycle persists despite fixed insolation | `config_perpetual_julday` was left non-positive, or was set but sea ice is still evolving |
 | `slab_energy_input` missing from output | reused an old `streams.atmosphere` |
 
 

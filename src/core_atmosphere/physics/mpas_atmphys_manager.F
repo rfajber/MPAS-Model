@@ -27,6 +27,10 @@
  integer, public:: day                  !Current day of the month.
  integer, public:: julday               !Initial Julian day.
  real(kind=RKIND), public:: curr_julday !Current Julian day (= 0.0 at 0Z on January 1st).
+ real(kind=RKIND), public:: phys_julday !Julian day seen by the physics that have an annual cycle.
+                                        !Equals curr_julday unless config_perpetual_julday is
+                                        !positive and config_perpetual_all_physics is true, in
+                                        !which case it is held at config_perpetual_julday.
  real(kind=RKIND), public:: gmt         !Greenwich mean time hour of model start (hr)
 
 !defines alarms for calling the long- and short-wave radiation codes, for calling the convec-
@@ -153,7 +157,10 @@
                    config_slab_ocean,         &
                    config_sst_update,         &
                    config_sstdiurn_update,    &
-                   config_deepsoiltemp_update
+                   config_deepsoiltemp_update,&
+                   config_perpetual_all_physics
+
+ real(kind=RKIND),pointer:: config_perpetual_julday
 
  character(len=StrKIND),pointer:: config_convection_scheme, &
                                   config_radt_lw_scheme,    &
@@ -181,6 +188,7 @@
  integer:: ierr
  real(kind=RKIND):: utc_s
  real(kind=RKIND):: xtime_m
+ real(kind=RKIND):: radt_julday
 
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write('')
@@ -201,6 +209,8 @@
  call mpas_pool_get_config(domain%blocklist%configs,'config_sst_update'         ,config_sst_update         )
  call mpas_pool_get_config(domain%blocklist%configs,'config_sstdiurn_update'    ,config_sstdiurn_update    )
  call mpas_pool_get_config(domain%blocklist%configs,'config_deepsoiltemp_update',config_deepsoiltemp_update)
+ call mpas_pool_get_config(domain%blocklist%configs,'config_perpetual_julday'   ,config_perpetual_julday   )
+ call mpas_pool_get_config(domain%blocklist%configs,'config_perpetual_all_physics',config_perpetual_all_physics)
 
 !update the current julian day and current year:
 
@@ -214,6 +224,22 @@
  julday = DoY
  curr_julday = real(julday-1) + utc_h / 24.0
  LeapYear = isLeapYear(year)
+
+!day of the year at which the radiation sees the annual cycle. A positive config_perpetual_julday
+!freezes it, so that the ozone climatology below is interpolated to the same fixed date as the
+!solar declination in radconst and neither carries a seasonal cycle.
+ radt_julday = curr_julday
+ if(config_perpetual_julday > 0._RKIND) radt_julday = config_perpetual_julday
+
+!day of the year seen by the other physics that carry an annual cycle: the deep soil temperature
+!update below, the non-orographic gravity-wave source in the gravity-wave drag driver, and Noah-MP.
+!These follow the model date unless config_perpetual_all_physics asks for them to be frozen too,
+!since freezing the radiation is the common case and freezing the land surface is not always wanted
+!with it. curr_julday itself is never overwritten, so anything that genuinely needs the model date
+!still has it.
+ phys_julday = curr_julday
+ if(config_perpetual_julday > 0._RKIND .and. config_perpetual_all_physics) &
+    phys_julday = config_perpetual_julday
 !call mpas_log_write('     YEAR        = $i', intArgs=(/year/))
 !call mpas_log_write('     JULDAY      = $i', intArgs=(/julday/))
 !call mpas_log_write('     GMT         = $r', realArgs=(/gmt/))
@@ -259,7 +285,7 @@
 
     !update the deep soil temperature:
     if(config_deepsoiltemp_update) &
-       call physics_update_deepsoiltemp(LeapYear,dt_dyn,curr_julday,mesh, &
+       call physics_update_deepsoiltemp(LeapYear,dt_dyn,phys_julday,mesh, &
                     sfc_input,diag_physics)
 
     block => block % next
@@ -316,7 +342,7 @@
 
        if((l_radtlw .and. trim(config_radt_lw_scheme) .eq. "rrtmg_lw") .or. &
            l_radtsw .and. trim(config_radt_sw_scheme) .eq. "rrtmg_sw" ) then
-          call o3climatology_from_MPAS(curr_julday,mesh,atm_input,diag_physics)
+          call o3climatology_from_MPAS(radt_julday,mesh,atm_input,diag_physics)
           call mpas_log_write('--- time to update the ozone climatology for RRTMG radiation codes')
        endif
     
@@ -470,6 +496,7 @@
  gmt    = utc_h
  julday = DoY
  curr_julday = real(julday-1)
+ phys_julday = curr_julday
 ! call mpas_log_write('     YEAR        =$i', intArgs=(/year/))
 ! call mpas_log_write('     JULDAY      =$i', intArgs=(/julday/))
 ! call mpas_log_write('     GMT         =$r', realArgs=(/gmt/))

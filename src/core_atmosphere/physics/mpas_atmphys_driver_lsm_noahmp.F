@@ -13,7 +13,7 @@
  use mpas_timer,only: mpas_timer_start, mpas_timer_stop
 
  use mpas_atmphys_constants,only: R_d,R_v
- use mpas_atmphys_manager,only  : year,curr_julday,month,day
+ use mpas_atmphys_manager,only  : year,phys_julday,month,day
  use mpas_atmphys_vars,only     : mpas_noahmp,xice_threshold
 
 
@@ -125,7 +125,7 @@
  mpas_noahmp%yr        = year
  mpas_noahmp%month     = month
  mpas_noahmp%day       = day
- mpas_noahmp%julian    = curr_julday 
+ mpas_noahmp%julian    = phys_julday 
 
 
 !--- initialization of xice_threshold:

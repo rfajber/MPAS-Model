@@ -217,6 +217,7 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
                      abstot_3d, absnxt_3d, emstot_3d,              &
                      doabsems,                                     &
                      fixed_co2, co2vmr_fixed,                      &
+                     julian_ozn,                                   &
                      ids,ide, jds,jde, kds,kde,                    &
                      ims,ime, jms,jme, kms,kme,                    &
                      its,ite, jts,jte, kts,kte                     )
@@ -242,6 +243,12 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
 ! present for the override to take effect; when they are absent camrad follows its own scenario.
    LOGICAL,    INTENT(IN   ), OPTIONAL :: fixed_co2
    REAL,       INTENT(IN   ), OPTIONAL :: co2vmr_fixed
+
+! Day of the year at which to interpolate the monthly ozone climatology, in place of JULIAN.
+! Absent, the climatology follows the model date as before. This is passed separately from
+! JULIAN so that only the ozone is held fixed; the aerosol month interpolation and the CO2
+! scenario continue to see the real model date.
+   REAL,       INTENT(IN   ), OPTIONAL :: julian_ozn
 
    INTEGER,    INTENT(IN  )  ::        n_cldadv
    INTEGER,    INTENT(IN  )  ::        JULDAY
@@ -413,6 +420,7 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
    real(r8), dimension(its:ite,kts:kte+1)           :: emstot ! Total emissivity
    CHARACTER(LEN=256) :: msgstr
    LOGICAL :: override_co2
+   REAL    :: julian_o3
 
 #if !defined(MAC_KLUDGE)
    lchnk = 1
@@ -452,6 +460,11 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
 
    override_co2 = .false.
    if(present(fixed_co2) .and. present(co2vmr_fixed)) override_co2 = fixed_co2
+
+   julian_o3 = JULIAN
+   if(present(julian_ozn)) then
+      if(julian_ozn .gt. 0.) julian_o3 = julian_ozn
+   endif
 
    if(override_co2) then
 
@@ -679,7 +692,7 @@ subroutine camrad(RTHRATENLW,RTHRATENSW,                           &
                    pint, lnpmid, lnpint, pdel, t, q,   &
                    cld, cicewp, cliqwp, tauxcl, tauxci, coszrs, clat, asdir, asdif,               &
                    aldir, aldif, solcon, GMT,JULDAY,JULIAN,DT,XTIME,   &
-                   pin, ozmixmj, ozmix, levsiz, num_months,  & 
+                   pin, ozmixmj, ozmix, levsiz, num_months, julian_o3,  &
                    m_psjp,m_psjn, aerosoljp, aerosoljn,  m_hybi, paerlev, naer_c, pmxrgn, nmxrgn, &
                    dolw, dosw, doabsems, abstot, absnxt, emstot, &
                    fsup, fsupc, fsdn, fsdnc, flup, flupc, fldn, fldnc, swcftoa, lwcftoa, olrtoa,  &
@@ -1449,7 +1462,7 @@ subroutine radctl(j, lchnk   ,ncol    , pcols, pver, pverp, pverr, pverrp, ppcns
 !                 qm1     ,cld     ,cicewp  ,cliqwp  ,coszrs,  clat, &
                   qm1     ,cld     ,cicewp  ,cliqwp  ,tauxcl, tauxci, coszrs,  clat, &
                   asdir   ,asdif   ,aldir   ,aldif   ,solcon, GMT,JULDAY,JULIAN,DT,XTIME,  &
-                  pin, ozmixmj, ozmix, levsiz, num_months,      &
+                  pin, ozmixmj, ozmix, levsiz, num_months, julian_o3,     &
                   m_psp, m_psn,  aerosoljp, aerosoljn, m_hybi, paerlev, naer_c, pmxrgn  , &
                   nmxrgn  ,                   &
                   dolw, dosw, doabsems, abstot, absnxt, emstot, &
@@ -1539,6 +1552,7 @@ subroutine radctl(j, lchnk   ,ncol    , pcols, pver, pverp, pverr, pverrp, ppcns
    REAL, INTENT(IN    )      ::        XTIME,GMT              
    INTEGER, INTENT(IN )      ::        JULDAY
    REAL,    INTENT(IN )      ::        JULIAN
+   REAL,    INTENT(IN )      ::        julian_o3     ! day of year for the ozone climatology
    REAL,    INTENT(IN )      ::        DT
    real(r8), intent(in)     :: m_psp(pcols),m_psn(pcols)       ! MATCH surface pressure
    real(r8), intent(in)     :: aerosoljp(pcols,paerlev,naer_c)   ! aerosol concentrations
@@ -1645,7 +1659,10 @@ subroutine radctl(j, lchnk   ,ncol    , pcols, pver, pverp, pverr, pverrp, ppcns
 ! Interpolate ozone volume mixing ratio to model levels
 !
 ! WRF: added pin, levsiz, ozmix here
-   call oznint(julday,julian,dt,gmt,xtime,ozmixmj,ozmix,levsiz,num_months,pcols)
+! julian_o3 is the day of the year the ozone climatology is interpolated to. It equals julian
+! unless the caller is holding the insolation at a fixed date, in which case the ozone is held
+! at that same date and the two stay consistent.
+   call oznint(julday,julian_o3,dt,gmt,xtime,ozmixmj,ozmix,levsiz,num_months,pcols)
 
    call radozn(lchnk   ,ncol    &
               ,pcols, pver &

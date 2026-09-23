@@ -13,7 +13,7 @@
 
  use mpas_atmphys_constants
  use mpas_atmphys_vars
- use mpas_atmphys_manager,only: curr_julday
+ use mpas_atmphys_manager,only: phys_julday
 
 !wrf physics:
  use module_bl_gwdo
@@ -806,7 +806,7 @@
                   dtaux3d_fd = dtaux3d_fd_p, dtauy3d_fd = dtauy3d_fd_p,                         &
                   ugwp_diags = ugwp_diags  , ngw_scheme = ngw_scheme  , xlatd    = xlat_p     , &
                   jindx1_tau = jindx1_tau_p, jindx2_tau = jindx2_tau_p,                         &
-                  ddy_j1tau  = ddy_j1tau_p , ddy_j2tau  = ddy_j2tau_p , r_DoY    = curr_julday, &
+                  ddy_j1tau  = ddy_j1tau_p , ddy_j2tau  = ddy_j2tau_p , r_DoY    = phys_julday, &
                   raincv     = raincv_p    , rainncv    = rainncv_p   , ntau_d1y = ntau_d1y   , &
                   ntau_d2t   = ntau_d2t    , days_limb  = days_limb   , tau_limb = tau_limb   , &
                   dudt_ngw   = dudt_ngw_p  , dvdt_ngw   = dvdt_ngw_p  , dtdt_ngw = dtdt_ngw_p , &

@@ -2396,10 +2396,15 @@
                      description="logical for configuration of input ozone data in RRMTG long- and short-wave radiation"
                      possible_values=".true. for using monthly-varying ozone data; .false. for using fixed vertical profile"/>
 
-                <nml_option name="config_perpetual_equinox" type="logical" default_value="false" in_defaults="false"
+                <nml_option name="config_perpetual_julday" type="real" default_value="-1." in_defaults="false"
                      units="-"
-                     description="logical for holding the insolation at equinoctial conditions on a circular orbit, removing the seasonal cycle while retaining the diurnal cycle, as in aquaplanet experiments"
-                     possible_values=".true. for fixed equinoctial insolation; .false. for the usual seasonally varying insolation"/>
+                     description="day of the year at which to hold the insolation, removing the seasonal cycle while retaining the diurnal cycle, as in aquaplanet experiments; the solar declination and the Earth-Sun distance are both evaluated at this day and then held fixed"
+                     possible_values="Real values in (0., 367.); a non-positive value gives the usual seasonally varying insolation. 80. is the vernal equinox, at which the declination is zero"/>
+
+                <nml_option name="config_perpetual_all_physics" type="logical" default_value="false" in_defaults="false"
+                     units="-"
+                     description="whether to extend config_perpetual_julday beyond the radiation, so that the deep soil temperature update, the gravity-wave drag and the Noah-MP land surface also see the fixed day of the year instead of the model date"
+                     possible_values=".true. to freeze the day of the year for all physics that use it; .false. to freeze it for the radiation only"/>
 
                 <nml_option name="config_fixed_co2" type="logical" default_value="false" in_defaults="false"
                      units="-"

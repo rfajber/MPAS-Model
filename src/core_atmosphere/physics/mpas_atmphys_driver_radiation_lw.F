@@ -822,7 +822,7 @@
 
 !local pointers:
  logical,pointer:: config_o3climatology
- logical,pointer:: config_perpetual_equinox
+ real(kind=RKIND),pointer:: config_perpetual_julday
  logical,pointer:: config_fixed_co2
  real(kind=RKIND),pointer:: config_co2vmr
  character(len=StrKIND),pointer:: radt_lw_scheme
@@ -836,7 +836,7 @@
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write(' --- enter subroutine driver_radiation_lw: ')
 
- call mpas_pool_get_config(configs,'config_perpetual_equinox',config_perpetual_equinox)
+ call mpas_pool_get_config(configs,'config_perpetual_julday',config_perpetual_julday)
  call mpas_pool_get_config(configs,'config_fixed_co2'        ,config_fixed_co2    )
  call mpas_pool_get_config(configs,'config_co2vmr'           ,config_co2vmr       )
  call mpas_pool_get_config(configs,'config_o3climatology'    ,config_o3climatology)
@@ -899,7 +899,7 @@
 ! are global variables in mpas_atmphys_vars.F and race conditions may occur otherwise!
 !$OMP SINGLE
        !... calculates solar declination:
-       call radconst(declin,solcon,curr_julday,degrad,dpd,config_perpetual_equinox)
+       call radconst(declin,solcon,curr_julday,degrad,dpd,config_perpetual_julday)
 !$OMP END SINGLE
 
 !... convert the radiation time_step to minutes:
@@ -950,7 +950,7 @@
                 n_cldadv      = 3             , abstot_3d     = abstot_p      ,              &
                 absnxt_3d     = absnxt_p      , emstot_3d     = emstot_p      ,              &
                 doabsems      = doabsems      , fixed_co2     = config_fixed_co2,            &
-                co2vmr_fixed  = config_co2vmr ,                                              &
+                co2vmr_fixed  = config_co2vmr , julian_ozn    = config_perpetual_julday ,    &
                 ids = ids , ide = ide , jds = jds , jde = jde , kds = kds , kde = kde ,      &
                 ims = ims , ime = ime , jms = jms , jme = jme , kms = kms , kme = kme ,      &
                 its = its , ite = ite , jts = jts , jte = jte , kts = kts , kte = kte        &
