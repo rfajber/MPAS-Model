@@ -126,6 +126,9 @@ module atm_core_interface
       logical, pointer :: config_apply_nudging
       logical, pointer :: nudging_filterActive
       real (kind=RKIND), pointer :: config_nudging_filter_tau
+      logical, pointer :: nudging_filter_aerosolsActive
+      real (kind=RKIND), pointer :: config_nudging_tau_nwfa
+      real (kind=RKIND), pointer :: config_nudging_tau_nifa
       logical, pointer :: held_suarezActive
       logical, pointer :: config_held_suarez
       logical, pointer :: slab_oceanActive
@@ -202,6 +205,22 @@ module atm_core_interface
          nudging_filterActive = .true.
       else
          nudging_filterActive = .false.
+      end if
+
+      nullify(config_nudging_tau_nwfa)
+      call mpas_pool_get_config(configs, 'config_nudging_tau_nwfa', config_nudging_tau_nwfa)
+
+      nullify(config_nudging_tau_nifa)
+      call mpas_pool_get_config(configs, 'config_nudging_tau_nifa', config_nudging_tau_nifa)
+
+      nullify(nudging_filter_aerosolsActive)
+      call mpas_pool_get_package(packages, 'nudging_filter_aerosolsActive', nudging_filter_aerosolsActive)
+
+      if (nudging_filterActive .and. &
+          (config_nudging_tau_nwfa > 0.0_RKIND .or. config_nudging_tau_nifa > 0.0_RKIND)) then
+         nudging_filter_aerosolsActive = .true.
+      else
+         nudging_filter_aerosolsActive = .false.
       end if
 
       !

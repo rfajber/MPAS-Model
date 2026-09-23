@@ -22,6 +22,7 @@ module mpas_atm_nudging
  use mpas_constants, only : rvord
  use mpas_timer, only : mpas_timer_start, mpas_timer_stop
  use mpas_atm_boundaries, only : mpas_atm_get_bdy_state
+ use mpas_log, only : mpas_log_write
 
  private
 
@@ -101,9 +102,12 @@ module mpas_atm_nudging
       type (mpas_pool_type), pointer :: nudging
 
       real (kind=RKIND), pointer :: config_nudging_filter_tau
+      real (kind=RKIND), pointer :: config_nudging_tau_nwfa
+      real (kind=RKIND), pointer :: config_nudging_tau_nifa
       real (kind=RKIND), dimension(:,:), pointer :: rho_edge, rho_zz, theta_m, u
       real (kind=RKIND), dimension(:,:,:), pointer :: scalars, tend_scalars
       real (kind=RKIND), dimension(:,:,:), pointer :: filt_u, filt_theta, filt_qv, filt_rho
+      real (kind=RKIND), dimension(:,:,:), pointer :: filt_nwfa, filt_nifa
 
       call mpas_pool_get_subpool(structs, 'tend', tend)
       call mpas_pool_get_subpool(structs, 'state', state)
@@ -128,6 +132,18 @@ module mpas_atm_nudging
          call mpas_pool_get_array(nudging, 'nudging_filter_qv', filt_qv)
          call mpas_pool_get_array(nudging, 'nudging_filter_rho_zz', filt_rho)
          !$acc update self(filt_u, filt_theta, filt_qv, filt_rho)
+
+         call mpas_pool_get_config(configs, 'config_nudging_tau_nwfa', config_nudging_tau_nwfa)
+         if (config_nudging_tau_nwfa > 0.0_RKIND) then
+            call mpas_pool_get_array(nudging, 'nudging_filter_nwfa', filt_nwfa)
+            !$acc update self(filt_nwfa)
+         end if
+
+         call mpas_pool_get_config(configs, 'config_nudging_tau_nifa', config_nudging_tau_nifa)
+         if (config_nudging_tau_nifa > 0.0_RKIND) then
+            call mpas_pool_get_array(nudging, 'nudging_filter_nifa', filt_nifa)
+            !$acc update self(filt_nifa)
+         end if
       end if
       MPAS_ACC_TIMER_STOP('atm_srk3: nudging ACC_data_xfer')
 #endif
@@ -152,8 +168,11 @@ module mpas_atm_nudging
       type (mpas_pool_type), pointer :: nudging
 
       real (kind=RKIND), pointer :: config_nudging_filter_tau
+      real (kind=RKIND), pointer :: config_nudging_tau_nwfa
+      real (kind=RKIND), pointer :: config_nudging_tau_nifa
       real (kind=RKIND), dimension(:,:,:), pointer :: tend_scalars
       real (kind=RKIND), dimension(:,:,:), pointer :: filt_u, filt_theta, filt_qv, filt_rho
+      real (kind=RKIND), dimension(:,:,:), pointer :: filt_nwfa, filt_nifa
 
       call mpas_pool_get_subpool(structs, 'tend', tend)
 
@@ -171,6 +190,18 @@ module mpas_atm_nudging
          call mpas_pool_get_array(nudging, 'nudging_filter_qv', filt_qv)
          call mpas_pool_get_array(nudging, 'nudging_filter_rho_zz', filt_rho)
          !$acc update device(filt_u, filt_theta, filt_qv, filt_rho)
+
+         call mpas_pool_get_config(configs, 'config_nudging_tau_nwfa', config_nudging_tau_nwfa)
+         if (config_nudging_tau_nwfa > 0.0_RKIND) then
+            call mpas_pool_get_array(nudging, 'nudging_filter_nwfa', filt_nwfa)
+            !$acc update device(filt_nwfa)
+         end if
+
+         call mpas_pool_get_config(configs, 'config_nudging_tau_nifa', config_nudging_tau_nifa)
+         if (config_nudging_tau_nifa > 0.0_RKIND) then
+            call mpas_pool_get_array(nudging, 'nudging_filter_nifa', filt_nifa)
+            !$acc update device(filt_nifa)
+         end if
       end if
       MPAS_ACC_TIMER_STOP('atm_srk3: nudging ACC_data_xfer')
 #endif
@@ -191,6 +222,12 @@ module mpas_atm_nudging
 !     d(theta)/dt  = (1/tau_theta) * (theta_drv - theta)
 !     d(qv)/dt     = (1/tau_qv)    * (qv_drv - qv)
 !     d(rho_zz)/dt = (1/tau_rho)   * (rho_zz_drv - rho_zz)
+!     d(nwfa)/dt   = (1/tau_nwfa)  * (nwfa_drv - nwfa)
+!     d(nifa)/dt   = (1/tau_nifa)  * (nifa_drv - nifa)
+!
+! The two aerosol number concentrations are those of the aerosol-aware Thompson microphysics, and
+! are nudged only when that scheme is active. They take no part in the moist coupling of theta_m;
+! like any other scalar they are coupled to the mass field alone.
 !
 ! and the resulting increments are then mass-coupled for the dynamics, following the same chain
 ! rule used by the IAU scheme in mpas_atm_iau.F. Because surface pressure is not prognostic in
@@ -228,25 +265,32 @@ module mpas_atm_nudging
       real (kind=RKIND), pointer :: config_nudging_tau_theta
       real (kind=RKIND), pointer :: config_nudging_tau_qv
       real (kind=RKIND), pointer :: config_nudging_tau_rho
+      real (kind=RKIND), pointer :: config_nudging_tau_nwfa
+      real (kind=RKIND), pointer :: config_nudging_tau_nifa
       real (kind=RKIND), pointer :: config_nudging_zbot
       real (kind=RKIND), pointer :: config_nudging_ztop
       real (kind=RKIND), pointer :: config_nudging_filter_tau
       logical, pointer :: config_do_restart
 
       integer, pointer :: nCells_ptr, nEdges_ptr, nCellsSolve_ptr, nEdgesSolve_ptr
-      integer, pointer :: nVertLevels_ptr, index_qv_ptr
+      integer, pointer :: nVertLevels_ptr, index_qv_ptr, index_nwfa_ptr, index_nifa_ptr
       integer :: nCells, nEdges, nCellsSolve, nEdgesSolve, nVertLevels, index_qv
+      integer :: index_nwfa, index_nifa
 
       real (kind=RKIND), dimension(:,:), pointer :: u, theta_m, rho_zz, rho_edge, zgrid
       real (kind=RKIND), dimension(:,:,:), pointer :: scalars, tend_scalars
       real (kind=RKIND), dimension(:,:,:), pointer :: filt_u, filt_theta, filt_qv, filt_rho
+      real (kind=RKIND), dimension(:,:,:), pointer :: filt_nwfa, filt_nifa
       integer, dimension(:,:), pointer :: cellsOnEdge
 
       real (kind=RKIND), dimension(:,:), allocatable :: u_drv, theta_drv, rho_zz_drv, qv_drv
+      real (kind=RKIND), dimension(:,:), allocatable :: nwfa_drv, nifa_drv
 
       real (kind=RKIND) :: alpha_u, alpha_theta, alpha_qv, alpha_rho
+      real (kind=RKIND) :: alpha_nwfa, alpha_nifa
       real (kind=RKIND) :: zbot, ztop, zagl, taper
       real (kind=RKIND) :: qv, theta, d_rho_zz, d_theta, d_qv, d_rqv, d_rtheta, d_u
+      real (kind=RKIND) :: aer, d_aer
       real (kind=RKIND) :: filter_coef
       logical :: filter_active, filter_init
       integer :: nStages
@@ -256,6 +300,8 @@ module mpas_atm_nudging
       call mpas_pool_get_config(block % configs, 'config_nudging_tau_theta', config_nudging_tau_theta)
       call mpas_pool_get_config(block % configs, 'config_nudging_tau_qv', config_nudging_tau_qv)
       call mpas_pool_get_config(block % configs, 'config_nudging_tau_rho', config_nudging_tau_rho)
+      call mpas_pool_get_config(block % configs, 'config_nudging_tau_nwfa', config_nudging_tau_nwfa)
+      call mpas_pool_get_config(block % configs, 'config_nudging_tau_nifa', config_nudging_tau_nifa)
       call mpas_pool_get_config(block % configs, 'config_nudging_zbot', config_nudging_zbot)
       call mpas_pool_get_config(block % configs, 'config_nudging_ztop', config_nudging_ztop)
       call mpas_pool_get_config(block % configs, 'config_nudging_filter_tau', config_nudging_filter_tau)
@@ -268,13 +314,18 @@ module mpas_atm_nudging
       alpha_theta = 0.0_RKIND
       alpha_qv    = 0.0_RKIND
       alpha_rho   = 0.0_RKIND
+      alpha_nwfa  = 0.0_RKIND
+      alpha_nifa  = 0.0_RKIND
       if (config_nudging_tau_u     > 0.0_RKIND) alpha_u     = 1.0_RKIND / config_nudging_tau_u
       if (config_nudging_tau_theta > 0.0_RKIND) alpha_theta = 1.0_RKIND / config_nudging_tau_theta
       if (config_nudging_tau_qv    > 0.0_RKIND) alpha_qv    = 1.0_RKIND / config_nudging_tau_qv
       if (config_nudging_tau_rho   > 0.0_RKIND) alpha_rho   = 1.0_RKIND / config_nudging_tau_rho
+      if (config_nudging_tau_nwfa  > 0.0_RKIND) alpha_nwfa  = 1.0_RKIND / config_nudging_tau_nwfa
+      if (config_nudging_tau_nifa  > 0.0_RKIND) alpha_nifa  = 1.0_RKIND / config_nudging_tau_nifa
 
       if (alpha_u <= 0.0_RKIND .and. alpha_theta <= 0.0_RKIND .and. &
-          alpha_qv <= 0.0_RKIND .and. alpha_rho <= 0.0_RKIND) then
+          alpha_qv <= 0.0_RKIND .and. alpha_rho <= 0.0_RKIND .and. &
+          alpha_nwfa <= 0.0_RKIND .and. alpha_nifa <= 0.0_RKIND) then
          return
       end if
 
@@ -292,6 +343,8 @@ module mpas_atm_nudging
       call mpas_pool_get_dimension(mesh, 'nEdgesSolve', nEdgesSolve_ptr)
       call mpas_pool_get_dimension(mesh, 'nVertLevels', nVertLevels_ptr)
       call mpas_pool_get_dimension(state, 'index_qv', index_qv_ptr)
+      call mpas_pool_get_dimension(state, 'index_nwfa', index_nwfa_ptr)
+      call mpas_pool_get_dimension(state, 'index_nifa', index_nifa_ptr)
 
       nCells = nCells_ptr
       nEdges = nEdges_ptr
@@ -299,6 +352,34 @@ module mpas_atm_nudging
       nEdgesSolve = nEdgesSolve_ptr
       nVertLevels = nVertLevels_ptr
       index_qv = index_qv_ptr
+
+      !
+      ! nwfa and nifa exist only with the aerosol-aware Thompson microphysics; the Registry gives
+      ! their constituent index as -1 otherwise. Asking to nudge a scalar the run does not carry
+      ! is a configuration error, so say so rather than silently doing nothing.
+      !
+      index_nwfa = -1
+      index_nifa = -1
+      if (associated(index_nwfa_ptr)) index_nwfa = index_nwfa_ptr
+      if (associated(index_nifa_ptr)) index_nifa = index_nifa_ptr
+
+      if (alpha_nwfa > 0.0_RKIND .and. index_nwfa <= 0) then
+         call mpas_log_write('config_nudging_tau_nwfa is positive, but the water-friendly aerosol', &
+                             messageType=MPAS_LOG_ERR)
+         call mpas_log_write('number nwfa is not a scalar in this run. Aerosol nudging requires the', &
+                             messageType=MPAS_LOG_ERR)
+         call mpas_log_write('aerosol-aware Thompson microphysics (config_microp_scheme = ''mp_thompson_aerosols'').', &
+                             messageType=MPAS_LOG_CRIT)
+      end if
+
+      if (alpha_nifa > 0.0_RKIND .and. index_nifa <= 0) then
+         call mpas_log_write('config_nudging_tau_nifa is positive, but the ice-friendly aerosol', &
+                             messageType=MPAS_LOG_ERR)
+         call mpas_log_write('number nifa is not a scalar in this run. Aerosol nudging requires the', &
+                             messageType=MPAS_LOG_ERR)
+         call mpas_log_write('aerosol-aware Thompson microphysics (config_microp_scheme = ''mp_thompson_aerosols'').', &
+                             messageType=MPAS_LOG_CRIT)
+      end if
 
       call mpas_pool_get_array(mesh, 'zgrid', zgrid)
       call mpas_pool_get_array(mesh, 'cellsOnEdge', cellsOnEdge)
@@ -324,6 +405,8 @@ module mpas_atm_nudging
          call mpas_pool_get_array(nudging, 'nudging_filter_theta', filt_theta)
          call mpas_pool_get_array(nudging, 'nudging_filter_qv', filt_qv)
          call mpas_pool_get_array(nudging, 'nudging_filter_rho_zz', filt_rho)
+         if (alpha_nwfa > 0.0_RKIND) call mpas_pool_get_array(nudging, 'nudging_filter_nwfa', filt_nwfa)
+         if (alpha_nifa > 0.0_RKIND) call mpas_pool_get_array(nudging, 'nudging_filter_nifa', filt_nifa)
 
          nStages = size(filt_theta, 1)
 
@@ -350,6 +433,16 @@ module mpas_atm_nudging
       call mpas_atm_get_bdy_state(clock, block, nVertLevels, nCells, 'theta', 0.0_RKIND, theta_drv)
       call mpas_atm_get_bdy_state(clock, block, nVertLevels, nCells, 'rho_zz', 0.0_RKIND, rho_zz_drv)
       call mpas_atm_get_bdy_state(clock, block, nVertLevels, nCells, 'qv', 0.0_RKIND, qv_drv)
+
+      if (alpha_nwfa > 0.0_RKIND) then
+         allocate(nwfa_drv(nVertLevels,nCells+1))
+         call mpas_atm_get_bdy_state(clock, block, nVertLevels, nCells, 'nwfa', 0.0_RKIND, nwfa_drv)
+      end if
+
+      if (alpha_nifa > 0.0_RKIND) then
+         allocate(nifa_drv(nVertLevels,nCells+1))
+         call mpas_atm_get_bdy_state(clock, block, nVertLevels, nCells, 'nifa', 0.0_RKIND, nifa_drv)
+      end if
 
       !
       ! Horizontal momentum
@@ -422,6 +515,42 @@ module mpas_atm_nudging
             tend_rtheta(k,iCell) = tend_rtheta(k,iCell) &
                                    + (1.0_RKIND + rvord * qv) * d_rtheta &
                                    + rvord * rho_zz(k,iCell) * theta * d_qv
+
+            !
+            ! Aerosol number concentrations. These are ordinary scalars: they are coupled to the
+            ! mass field exactly as qv is, but contribute nothing to theta_m, so there is no
+            ! counterpart to the rtheta correction above. d_rho_zz has already been tapered and
+            ! scaled by alpha_rho at this point, so the coupling term matches the one used for qv.
+            !
+            if (alpha_nwfa > 0.0_RKIND) then
+               aer = scalars(index_nwfa,k,iCell)
+               d_aer = nwfa_drv(k,iCell) - aer
+
+               if (filter_active) then
+                  if (filter_init) filt_nwfa(:,k,iCell) = d_aer
+                  call nudging_filter_update(filt_nwfa(:,k,iCell), d_aer, filter_coef)
+                  d_aer = filt_nwfa(nStages,k,iCell)
+               end if
+
+               d_aer = taper * alpha_nwfa * d_aer
+               tend_scalars(index_nwfa,k,iCell) = tend_scalars(index_nwfa,k,iCell) &
+                                                  + d_aer * rho_zz(k,iCell) + aer * d_rho_zz
+            end if
+
+            if (alpha_nifa > 0.0_RKIND) then
+               aer = scalars(index_nifa,k,iCell)
+               d_aer = nifa_drv(k,iCell) - aer
+
+               if (filter_active) then
+                  if (filter_init) filt_nifa(:,k,iCell) = d_aer
+                  call nudging_filter_update(filt_nifa(:,k,iCell), d_aer, filter_coef)
+                  d_aer = filt_nifa(nStages,k,iCell)
+               end if
+
+               d_aer = taper * alpha_nifa * d_aer
+               tend_scalars(index_nifa,k,iCell) = tend_scalars(index_nifa,k,iCell) &
+                                                  + d_aer * rho_zz(k,iCell) + aer * d_rho_zz
+            end if
          end do
       end do
 
@@ -429,6 +558,8 @@ module mpas_atm_nudging
       deallocate(theta_drv)
       deallocate(rho_zz_drv)
       deallocate(qv_drv)
+      if (allocated(nwfa_drv)) deallocate(nwfa_drv)
+      if (allocated(nifa_drv)) deallocate(nifa_drv)
 
  end subroutine atm_add_tend_nudging
 !==================================================================================================

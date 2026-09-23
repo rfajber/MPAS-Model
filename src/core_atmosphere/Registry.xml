@@ -383,6 +383,14 @@
                      units="m"
                      description="Height above ground level above which the full nudging strength is applied, ramping linearly from zero at config_nudging_zbot"
                      possible_values="Non-negative real values greater than config_nudging_zbot; the vertical taper is disabled when config_nudging_ztop &lt;= config_nudging_zbot"/>
+                <nml_option name="config_nudging_tau_nwfa" type="real" default_value="-1." in_defaults="false"
+                     units="s"
+                     description="Relaxation timescale for the water-friendly aerosol number concentration; requires the aerosol-aware Thompson microphysics"
+                     possible_values="Positive real values; a non-positive value disables nudging of the water-friendly aerosol number"/>
+                <nml_option name="config_nudging_tau_nifa" type="real" default_value="-1." in_defaults="false"
+                     units="s"
+                     description="Relaxation timescale for the ice-friendly aerosol number concentration; requires the aerosol-aware Thompson microphysics"
+                     possible_values="Positive real values; a non-positive value disables nudging of the ice-friendly aerosol number"/>
                 <nml_option name="config_nudging_filter_tau" type="real" default_value="0."
                      units="s"
                      description="Timescale of the temporal low-pass filter applied to the model-minus-driver departure before it is relaxed, making the nudging selective for slowly evolving scales"
@@ -555,6 +563,7 @@
                 <package name="limited_area" description="Limited-area simulations, which have lateral boundaries"/>
                 <package name="nudging" description="Relaxation of the model state toward a driving state"/>
                 <package name="nudging_filter" description="Temporal low-pass filtering of the nudging departure"/>
+                <package name="nudging_filter_aerosols" description="Temporal low-pass filtering of the nudged aerosol number departure"/>
                 <package name="held_suarez" description="Held-Suarez idealized forcing"/>
                 <package name="slab_ocean" description="Prognostic slab ocean surface"/>
                 <package name="jedi_da" description="Data Assimilation in JEDI framework"/>
@@ -4150,6 +4159,19 @@
                 <var name="nudging_filter_rho_zz" type="real"
                      dimensions="nNudgeFilterStages nVertLevels nCells Time" units="kg m^{-3}"
                      description="Low-pass filtered departure of the dry density from the driving state"/>
+
+                <!-- Aerosol number filter states carry their own package rather than nudging_filter,
+                     so that the common case of nudging without aerosols does not pay for two more
+                     arrays of nNudgeFilterStages*nVertLevels*nCells. -->
+                <var name="nudging_filter_nwfa" type="real"
+                     dimensions="nNudgeFilterStages nVertLevels nCells Time" units="nb kg^{-1}"
+                     packages="nudging_filter_aerosols"
+                     description="Low-pass filtered departure of the water-friendly aerosol number concentration from the driving state"/>
+
+                <var name="nudging_filter_nifa" type="real"
+                     dimensions="nNudgeFilterStages nVertLevels nCells Time" units="nb kg^{-1}"
+                     packages="nudging_filter_aerosols"
+                     description="Low-pass filtered departure of the ice-friendly aerosol number concentration from the driving state"/>
 
         </var_struct>
 

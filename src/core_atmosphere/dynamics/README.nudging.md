@@ -22,6 +22,8 @@ d(u)/dt      = (1/tau_u)     * (u_drv      - u)
 d(theta)/dt  = (1/tau_theta) * (theta_drv  - theta)
 d(qv)/dt     = (1/tau_qv)    * (qv_drv     - qv)
 d(rho_zz)/dt = (1/tau_rho)   * (rho_zz_drv - rho_zz)
+d(nwfa)/dt   = (1/tau_nwfa)  * (nwfa_drv   - nwfa)
+d(nifa)/dt   = (1/tau_nifa)  * (nifa_drv   - nifa)
 ```
 
 Each variable has its own relaxation timescale, so the wind can be constrained
@@ -67,6 +69,8 @@ All options live in the `nudging` record of `namelist.atmosphere`.
 | `config_nudging_tau_theta` | real | `21600.` | Relaxation timescale for potential temperature, in seconds |
 | `config_nudging_tau_qv` | real | `21600.` | Relaxation timescale for water vapor mixing ratio, in seconds |
 | `config_nudging_tau_rho` | real | `21600.` | Relaxation timescale for dry density, and hence surface pressure, in seconds |
+| `config_nudging_tau_nwfa` | real | `-1.` | Relaxation timescale for water-friendly aerosol number, in seconds |
+| `config_nudging_tau_nifa` | real | `-1.` | Relaxation timescale for ice-friendly aerosol number, in seconds |
 | `config_nudging_zbot` | real | `0.` | Height AGL below which no nudging is applied, in metres |
 | `config_nudging_ztop` | real | `0.` | Height AGL above which the full nudging strength is applied, in metres |
 | `config_nudging_filter_tau` | real | `0.` | Timescale of the temporal low-pass filter on the departure, in seconds; non-positive disables it |
@@ -102,6 +106,80 @@ To make that scale-selective, add a filter timescale:
     config_nudging_filter_tau    = 86400.
     config_nudging_filter_stages = 2
 ```
+
+
+## Nudging aerosols
+
+The two aerosol number concentrations of the aerosol-aware Thompson
+microphysics, `nwfa` (water-friendly) and `nifa` (ice-friendly), can be relaxed
+toward driving data in the same way as the other fields, each with its own
+timescale:
+
+```
+&nudging
+    config_apply_nudging    = .true.
+    config_nudging_tau_nwfa = 86400.
+    config_nudging_tau_nifa = 86400.
+/
+```
+
+Both default to `-1.`, so aerosol nudging is off unless you ask for it, and both
+appear in the `nudging` record. Neither is written into a generated
+`namelist.atmosphere` (`in_defaults="false"`), so add them by hand.
+
+The driving values come from the **same `lbc_in` files** as everything else, as
+the `nwfa` and `nifa` constituents of `lbc_scalars`. The stream already carried
+them for limited-area runs with this microphysics, so the file format, the
+two-time-level bookkeeping and the time interpolation are unchanged; the aerosol
+fields simply have to be present in the files you generate. Which files those
+are is set by the stream's `filename_template` in `streams.atmosphere`, so
+pointing the run at your own aerosol data is a matter of writing it into that
+series.
+
+### Requirements
+
+`nwfa` and `nifa` exist as scalars only when the aerosol-aware Thompson scheme
+is selected:
+
+```
+&physics
+    config_microp_scheme = 'mp_thompson_aerosols'
+/
+```
+
+Without it the Registry gives their constituent index as `-1`. Asking to nudge a
+scalar the run does not carry is a configuration error rather than something to
+ignore quietly, so the model aborts at the first timestep with a message naming
+the option and the scheme it needs.
+
+### How they are coupled
+
+Aerosol numbers are ordinary scalars. They are mass-coupled to `rho_zz` exactly
+as `qv` is,
+
+```
+d(rho_zz*nwfa)/dt = rho_zz * d(nwfa)/dt + nwfa * d(rho_zz)/dt
+```
+
+so nudging the density field feeds through to the aerosol tendency. The second
+term is not optional: for a 5% density departure it is a 5% error in the aerosol
+tendency if dropped.
+
+Unlike `qv`, they take no part in the moist coupling of `theta_m`, which depends
+on water vapour alone. There is therefore no counterpart to the `rtheta`
+correction described under *Implementation notes*, and nudging aerosols does not
+perturb the thermodynamics except through the microphysics itself.
+
+The vertical taper (`config_nudging_zbot`, `config_nudging_ztop`) and the
+temporal filter apply to the aerosols on the same terms as everything else.
+
+### Memory
+
+The filter states for the aerosols are gated on their own package rather than on
+`nudging_filter`, so a run that filters the wind and temperature but does not
+nudge aerosols allocates nothing extra. When both are on, each species adds one
+array of `config_nudging_filter_stages * nVertLevels * nCells`, the same size as
+the existing `nudging_filter_qv`.
 
 
 ## Temporal low-pass filtering
@@ -155,7 +233,8 @@ ERA5 data offline.
 ### Memory and restarts
 
 The filter stores one array per field per stage, over four fields (`u` on edges,
-`theta`, `qv` and `rho_zz` on cells). Taking one cell field of
+`theta`, `qv` and `rho_zz` on cells), plus `nwfa` and `nifa` when those are being
+nudged as well. Taking one cell field of
 `nVertLevels × 8` bytes as the unit, and using `nEdges ≈ 3·nCells`, that is
 6 units per stage, or about 2.6 KB per owned cell per stage at 55 levels in
 double precision. For comparison the `lbc` pool already costs roughly 52 units,
@@ -415,3 +494,11 @@ global meshes.
   filter has not: that code path, including the restart of the filter states,
   has never been exercised in a real run. Treat it as less proven than the rest
   when enabling `config_nudging_filter_tau`.
+* Aerosol nudging has not been run either. The algebra of the mass coupling has
+  been checked against a finite difference, and the module compiles, but no
+  simulation has used it.
+* Only `nwfa` and `nifa` can be nudged. The other aerosol representation in
+  MPAS-A, the `aerosols` array read by the CAM radiation, is not a prognostic
+  scalar and is filled with a hardcoded uniform profile in `aerosol_init`; there
+  is nothing there to relax toward a driving state. Prescribing that array from a
+  file would be a separate change in the physics, not in this module.
