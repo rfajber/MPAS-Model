@@ -299,6 +299,7 @@ module atm_core
    subroutine atm_simulation_clock_init(core_clock, configs, ierr)
 
       use mpas_timekeeping
+      use mpas_string_utils, only : mpas_strip_whitespace
 
       implicit none
 
@@ -315,6 +316,7 @@ module atm_core
       character (len=StrKIND), pointer :: config_run_duration
       character (len=StrKIND), pointer :: config_stop_time
       character (len=StrKIND) :: startTimeStamp
+      character (len=StrKIND) :: rawTimeStamp
       integer :: iounit
 
 
@@ -326,16 +328,59 @@ module atm_core
       call mpas_pool_get_config(configs, 'config_run_duration', config_run_duration)
       call mpas_pool_get_config(configs, 'config_stop_time', config_stop_time)
 
-      if(trim(config_start_time) == 'file') then
+      if(trim(mpas_strip_whitespace(config_start_time)) == 'file') then
          call mpas_new_unit(iounit)
          open(iounit,file=trim(config_restart_timestamp_name),form='formatted',status='old')
-         read(iounit,*) startTimeStamp
+         read(iounit,*) rawTimeStamp
          close(iounit)
          call mpas_release_unit(iounit)
       else
-        startTimeStamp = config_start_time
+        rawTimeStamp = config_start_time
       end if
+
+      !
+      ! Remove any whitespace from the initial time before it is parsed.
+      !
+      ! mpas_set_time splits the string on '_', ':' and '-' and reads the pieces,
+      ! and mpas_split_string trims only trailing blanks. A leading space in the
+      ! namelist value, a tab, a carriage return from a file that has been
+      ! through a DOS editor, or NUL padding in a restart_timestamp file written
+      ! elsewhere all survive that trim and are carried into the parse. The
+      ! result is either a parse failure or, worse, a start time that differs
+      ! from the intended one, which then fails to match 'xtime' in the input
+      ! file because stream reads seek on exact time by default.
+      !
+      startTimeStamp = mpas_strip_whitespace(rawTimeStamp)
+
+      if (trim(startTimeStamp) /= trim(rawTimeStamp)) then
+         call mpas_log_write('Whitespace was removed from the initial time before it was interpreted.', &
+                             messageType=MPAS_LOG_WARN)
+         call mpas_log_write('The initial time was specified as ['//trim(rawTimeStamp)//']', &
+                             messageType=MPAS_LOG_WARN)
+         call mpas_log_write('and is being used as ['//trim(startTimeStamp)//']', &
+                             messageType=MPAS_LOG_WARN)
+      end if
+
+      if (len_trim(startTimeStamp) == 0) then
+         call mpas_log_write('The initial time for the simulation is empty.', messageType=MPAS_LOG_ERR)
+         if (trim(mpas_strip_whitespace(config_start_time)) == 'file') then
+            call mpas_log_write('It was read from the file '''//trim(config_restart_timestamp_name)//'''.', &
+                                messageType=MPAS_LOG_CRIT)
+         else
+            call mpas_log_write('Please set config_start_time in the &nhyd_model namelist group.', &
+                                messageType=MPAS_LOG_CRIT)
+         end if
+      end if
+
+      local_err = 0
       call mpas_set_time(curr_time=startTime, dateTimeString=startTimeStamp, ierr=local_err)
+      if (local_err /= 0) then
+         call mpas_log_write('Could not interpret the initial time ['//trim(startTimeStamp)//']', &
+                             messageType=MPAS_LOG_ERR)
+         call mpas_log_write('The expected form is YYYY-MM-DD_hh:mm:ss.', messageType=MPAS_LOG_CRIT)
+      end if
+
+      call mpas_log_write('Simulation start time is '''//trim(startTimeStamp)//'''')
       call mpas_set_timeInterval(timeStep, dt=config_dt, ierr=local_err)
 
       if (trim(config_run_duration) /= "none") then

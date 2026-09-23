@@ -69,6 +69,53 @@ module mpas_string_utils
     end subroutine mpas_split_string
 
     !-----------------------------------------------------------------------
+    !  function mpas_strip_whitespace
+    !
+    !> \brief Returns string with all whitespace characters removed
+    !> \details This function removes every whitespace character from "string",
+    !>          including characters that the Fortran intrinsic trim() does not
+    !>          treat as blanks: horizontal tab, line feed, vertical tab, form
+    !>          feed, carriage return, and NUL. Leading and embedded whitespace
+    !>          is removed as well as trailing whitespace. The result is blank
+    !>          padded to the length of "string".
+    !>
+    !>          This is intended for values that are parsed character by
+    !>          character rather than with a list-directed read -- date and time
+    !>          strings, in particular -- where a stray carriage return from a
+    !>          file that has passed through a DOS editor, or NUL padding in a
+    !>          character variable written by a netCDF library, would otherwise
+    !>          be carried into the parser.
+    !
+    !-----------------------------------------------------------------------
+    function mpas_strip_whitespace(string) result(stringOut)
+
+        implicit none
+
+        ! Arguments
+        character(len=*), intent(in) :: string
+
+        ! Result
+        character(len=len(string)) :: stringOut
+
+        ! Local variables
+        integer :: i, n, ic
+
+        stringOut = ' '
+        n = 0
+
+        do i = 1, len(string)
+            ic = iachar(string(i:i))
+
+            ! Space, or one of NUL, HT, LF, VT, FF, CR
+            if (ic == 32 .or. ic == 0 .or. (ic >= 9 .and. ic <= 13)) cycle
+
+            n = n + 1
+            stringOut(n:n) = string(i:i)
+        end do
+
+    end function mpas_strip_whitespace
+
+    !-----------------------------------------------------------------------
     !  routine mpas_string_replace
     !
     !> \brief Returns string with charToReplace replaced with targetChar
