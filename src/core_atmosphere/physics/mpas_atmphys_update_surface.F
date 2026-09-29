@@ -18,6 +18,8 @@
  implicit none
  private
  public:: physics_update_slab_ocean, &
+          physics_init_land_nudging,  &
+          physics_update_land_nudging,&
           physics_update_sst,         &
           physics_update_sstskin,     &
           physics_update_surface,     &
@@ -209,6 +211,161 @@
  end do
 
  end subroutine physics_update_slab_ocean
+
+!=================================================================================================================
+ subroutine physics_init_land_nudging(mesh,sfc_input,diag_physics,land_nudging)
+!=================================================================================================================
+! Store the land surface state at the start of the run, as the target of physics_update_land_nudging.
+! Called once from atm_mpas_init_block after physics_init, so that the stored values are those the
+! land surface scheme actually starts from, and only on a cold start: on a restart the target is
+! read back from the restart stream, where the land_nudging var_struct is carried.
+
+ implicit none
+
+!input arguments:
+ type(mpas_pool_type),intent(in):: mesh
+ type(mpas_pool_type),intent(in):: sfc_input
+ type(mpas_pool_type),intent(in):: diag_physics
+
+!inout arguments:
+ type(mpas_pool_type),intent(inout):: land_nudging
+
+!local pointers:
+ integer,pointer:: nCellsSolve,nSoilLevels
+
+ real(kind=RKIND),dimension(:),pointer  :: tsk,canwat,snow,snowh
+ real(kind=RKIND),dimension(:,:),pointer:: tslb,smois,sh2o
+ real(kind=RKIND),dimension(:),pointer  :: ref_tsk,ref_canwat,ref_snow,ref_snowh
+ real(kind=RKIND),dimension(:,:),pointer:: ref_tslb,ref_smois,ref_sh2o
+
+!local variables:
+ integer:: iCell,iSoil
+
+!-----------------------------------------------------------------------------------------------------------------
+
+ call mpas_pool_get_dimension(mesh,'nCellsSolve',nCellsSolve)
+ call mpas_pool_get_dimension(mesh,'nSoilLevels',nSoilLevels)
+
+ call mpas_pool_get_array(sfc_input,'skintemp',tsk  )
+ call mpas_pool_get_array(sfc_input,'tslb'    ,tslb )
+ call mpas_pool_get_array(sfc_input,'smois'   ,smois)
+ call mpas_pool_get_array(sfc_input,'sh2o'    ,sh2o )
+ call mpas_pool_get_array(sfc_input,'snow'    ,snow )
+ call mpas_pool_get_array(sfc_input,'snowh'   ,snowh)
+ call mpas_pool_get_array(diag_physics,'canwat',canwat)
+
+ call mpas_pool_get_array(land_nudging,'land_ref_skintemp',ref_tsk   )
+ call mpas_pool_get_array(land_nudging,'land_ref_tslb'    ,ref_tslb  )
+ call mpas_pool_get_array(land_nudging,'land_ref_smois'   ,ref_smois )
+ call mpas_pool_get_array(land_nudging,'land_ref_sh2o'    ,ref_sh2o  )
+ call mpas_pool_get_array(land_nudging,'land_ref_canwat'  ,ref_canwat)
+ call mpas_pool_get_array(land_nudging,'land_ref_snow'    ,ref_snow  )
+ call mpas_pool_get_array(land_nudging,'land_ref_snowh'   ,ref_snowh )
+
+ do iCell = 1, nCellsSolve
+    ref_tsk(iCell)    = tsk(iCell)
+    ref_canwat(iCell) = canwat(iCell)
+    ref_snow(iCell)   = snow(iCell)
+    ref_snowh(iCell)  = snowh(iCell)
+    do iSoil = 1, nSoilLevels
+       ref_tslb(iSoil,iCell)  = tslb(iSoil,iCell)
+       ref_smois(iSoil,iCell) = smois(iSoil,iCell)
+       ref_sh2o(iSoil,iCell)  = sh2o(iSoil,iCell)
+    enddo
+ enddo
+
+ end subroutine physics_init_land_nudging
+
+!=================================================================================================================
+ subroutine physics_update_land_nudging(dt,configs,mesh,sfc_input,diag_physics,land_nudging)
+!=================================================================================================================
+! Relax the prognostic state of the Noah land surface scheme toward its values at the start of the
+! run:
+!
+!     dx/dt = (x_ref - x) / config_land_nudging_tau
+!
+! for the skin temperature, the soil temperature, the total and liquid soil moisture, the canopy
+! water, the snow water equivalent and the snow depth, at land cells only. Over water the skin
+! temperature belongs to the SST, and at sea-ice cells tslb holds the ice temperature.
+!
+! The relaxation is integrated exactly over the step, x = x_ref + (x - x_ref)*exp(-dt/tau), so it is
+! stable for any tau and never overshoots the target. Each step therefore moves every variable to a
+! weighted average of its current and target values, with the same weight for all of them, which
+! keeps the state physical without any clipping: smois >= sh2o >= 0 holds for the average because it
+! holds for both ends, and the snow density snow/snowh stays between its current and target values.
+!
+! The nudging is a source and sink of heat and water that is not balanced anywhere. It does not
+! conserve energy or water, and the land surface budgets will not close in a nudged run.
+
+ implicit none
+
+!input arguments:
+ real(kind=RKIND),intent(in):: dt
+ type(mpas_pool_type),intent(in):: configs
+ type(mpas_pool_type),intent(in):: mesh
+ type(mpas_pool_type),intent(in):: land_nudging
+
+!inout arguments:
+ type(mpas_pool_type),intent(inout):: sfc_input
+ type(mpas_pool_type),intent(inout):: diag_physics
+
+!local pointers:
+ real(kind=RKIND),pointer:: config_land_nudging_tau
+ integer,pointer:: nCellsSolve,nSoilLevels
+
+ integer,dimension(:),pointer:: landmask
+ real(kind=RKIND),dimension(:),pointer  :: tsk,canwat,snow,snowh
+ real(kind=RKIND),dimension(:,:),pointer:: tslb,smois,sh2o
+ real(kind=RKIND),dimension(:),pointer  :: ref_tsk,ref_canwat,ref_snow,ref_snowh
+ real(kind=RKIND),dimension(:,:),pointer:: ref_tslb,ref_smois,ref_sh2o
+
+!local variables:
+ integer:: iCell,iSoil
+ real(kind=RKIND):: keep
+
+!-----------------------------------------------------------------------------------------------------------------
+
+ call mpas_pool_get_config(configs,'config_land_nudging_tau',config_land_nudging_tau)
+
+ call mpas_pool_get_dimension(mesh,'nCellsSolve',nCellsSolve)
+ call mpas_pool_get_dimension(mesh,'nSoilLevels',nSoilLevels)
+
+ call mpas_pool_get_array(sfc_input,'landmask',landmask)
+ call mpas_pool_get_array(sfc_input,'skintemp',tsk     )
+ call mpas_pool_get_array(sfc_input,'tslb'    ,tslb    )
+ call mpas_pool_get_array(sfc_input,'smois'   ,smois   )
+ call mpas_pool_get_array(sfc_input,'sh2o'    ,sh2o    )
+ call mpas_pool_get_array(sfc_input,'snow'    ,snow    )
+ call mpas_pool_get_array(sfc_input,'snowh'   ,snowh   )
+ call mpas_pool_get_array(diag_physics,'canwat',canwat )
+
+ call mpas_pool_get_array(land_nudging,'land_ref_skintemp',ref_tsk   )
+ call mpas_pool_get_array(land_nudging,'land_ref_tslb'    ,ref_tslb  )
+ call mpas_pool_get_array(land_nudging,'land_ref_smois'   ,ref_smois )
+ call mpas_pool_get_array(land_nudging,'land_ref_sh2o'    ,ref_sh2o  )
+ call mpas_pool_get_array(land_nudging,'land_ref_canwat'  ,ref_canwat)
+ call mpas_pool_get_array(land_nudging,'land_ref_snow'    ,ref_snow  )
+ call mpas_pool_get_array(land_nudging,'land_ref_snowh'   ,ref_snowh )
+
+!fraction of the departure from the target that survives one step:
+ keep = exp(-dt / config_land_nudging_tau)
+
+ do iCell = 1, nCellsSolve
+    if(landmask(iCell) /= 1) cycle
+
+    tsk(iCell)    = ref_tsk(iCell)    + (tsk(iCell)    - ref_tsk(iCell)   ) * keep
+    canwat(iCell) = ref_canwat(iCell) + (canwat(iCell) - ref_canwat(iCell)) * keep
+    snow(iCell)   = ref_snow(iCell)   + (snow(iCell)   - ref_snow(iCell)  ) * keep
+    snowh(iCell)  = ref_snowh(iCell)  + (snowh(iCell)  - ref_snowh(iCell) ) * keep
+
+    do iSoil = 1, nSoilLevels
+       tslb(iSoil,iCell)  = ref_tslb(iSoil,iCell)  + (tslb(iSoil,iCell)  - ref_tslb(iSoil,iCell) ) * keep
+       smois(iSoil,iCell) = ref_smois(iSoil,iCell) + (smois(iSoil,iCell) - ref_smois(iSoil,iCell)) * keep
+       sh2o(iSoil,iCell)  = ref_sh2o(iSoil,iCell)  + (sh2o(iSoil,iCell)  - ref_sh2o(iSoil,iCell) ) * keep
+    enddo
+ enddo
+
+ end subroutine physics_update_land_nudging
 
 !=================================================================================================================
  subroutine physics_update_sst(dminfo,config_frac_seaice,mesh,sfc_input,diag_physics)

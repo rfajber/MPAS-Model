@@ -148,10 +148,10 @@ Notes on the choices:
   the ozone climatology, so ozone no longer carries a seasonal cycle either.
   Keeping the climatology on is preferable to switching it off, which would
   replace the latitude-dependent distribution with a single fixed profile.
-* `config_perpetual_all_physics = true` extends the frozen date to the deep soil
-  temperature, the gravity-wave drag and Noah-MP. On an aquaplanet only the
-  gravity-wave source actually matters, since there is no land, but it is the one
-  remaining annual cycle in the physics.
+* `config_perpetual_all_physics = true` extends the frozen date to the gravity-wave
+  drag and Noah-MP. On an aquaplanet only the gravity-wave source actually
+  matters, since there is no land, but it is the one remaining annual cycle in
+  the physics.
 * `config_sst_update` and `config_sstdiurn_update` must both be false. The model
   rejects either in combination with the slab at startup, because both would
   write `sst` behind the slab's back and break its energy budget.

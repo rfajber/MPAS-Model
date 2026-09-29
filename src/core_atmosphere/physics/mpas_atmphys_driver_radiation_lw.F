@@ -831,12 +831,20 @@
 !local variables:
  integer:: o3input
  integer:: cldovrlp,idcor
+ integer:: mcica_julday
  real(kind=RKIND):: radt,xtime_m
 
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write(' --- enter subroutine driver_radiation_lw: ')
 
  call mpas_pool_get_config(configs,'config_perpetual_julday',config_perpetual_julday)
+
+!day of the year passed to RRTMG, whose only use of it is the latitude-varying decorrelation length
+!of the McICA cloud overlap (config_radt_cld_dcorrlen = 'latitude_varying'). It follows
+!config_perpetual_julday like the declination, converted from days since 0Z on January 1st to the
+!1-based day of the year that RRTMG expects:
+ mcica_julday = julday
+ if(config_perpetual_julday > 0._RKIND) mcica_julday = int(config_perpetual_julday) + 1
  call mpas_pool_get_config(configs,'config_fixed_co2'        ,config_fixed_co2    )
  call mpas_pool_get_config(configs,'config_co2vmr'           ,config_co2vmr       )
  call mpas_pool_get_config(configs,'config_o3climatology'    ,config_o3climatology)
@@ -874,7 +882,7 @@
             qv3d     = qvrad_p     , qc3d       = qcrad_p       , qi3d      = qirad_p    , &
             qs3d     = qsrad_p     , cldfra3d   = cldfrac_p     , tsk       = tsk_p      , &
             emiss    = sfc_emiss_p , xland      = xland_p       , xice      = xice_p     , &
-            snow     = snow_p      , xlat       = xlat_p        , julday    = julday     , &
+            snow     = snow_p      , xlat       = xlat_p        , julday    = mcica_julday, &
             icloud   = icloud      , cldovrlp   = cldovrlp      , idcor     = idcor      , &
             o3input  = o3input     , noznlevels = num_oznlevels , pin       = pin_p      , &
             o3clim   = o3clim_p    , glw        = glw_p         , olr       = olrtoa_p   , &

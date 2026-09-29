@@ -133,6 +133,8 @@ module atm_core_interface
       logical, pointer :: config_held_suarez
       logical, pointer :: slab_oceanActive
       logical, pointer :: config_slab_ocean
+      logical, pointer :: land_nudgingActive
+      logical, pointer :: config_land_nudging
       logical, pointer :: config_jedi_da, jedi_daActive
       logical, pointer :: no_invariant_streamActive
       logical, pointer :: ugwp_orog_streamActive
@@ -251,6 +253,21 @@ module atm_core_interface
          slab_oceanActive = .true.
       else
          slab_oceanActive = .false.
+      end if
+
+      !
+      ! Land surface nudging
+      !
+      nullify(config_land_nudging)
+      call mpas_pool_get_config(configs, 'config_land_nudging', config_land_nudging)
+
+      nullify(land_nudgingActive)
+      call mpas_pool_get_package(packages, 'land_nudgingActive', land_nudgingActive)
+
+      if (config_land_nudging) then
+         land_nudgingActive = .true.
+      else
+         land_nudgingActive = .false.
       end if
 
       !

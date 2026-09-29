@@ -113,6 +113,10 @@
  real(kind=RKIND),pointer:: config_co2vmr
  real(kind=RKIND),pointer:: config_perpetual_julday
  logical,pointer:: config_perpetual_all_physics
+ logical,pointer:: config_perpetual_greeness
+ real(kind=RKIND),pointer:: config_perpetual_greeness_julday
+ logical,pointer:: config_land_nudging
+ real(kind=RKIND),pointer:: config_land_nudging_tau
 
 !-----------------------------------------------------------------------------------------------------------------
 !call mpas_log_write('')
@@ -124,6 +128,10 @@
  call mpas_pool_get_config(configs,'config_co2vmr'           ,config_co2vmr           )
  call mpas_pool_get_config(configs,'config_perpetual_julday' ,config_perpetual_julday )
  call mpas_pool_get_config(configs,'config_perpetual_all_physics',config_perpetual_all_physics)
+ call mpas_pool_get_config(configs,'config_perpetual_greeness',config_perpetual_greeness)
+ call mpas_pool_get_config(configs,'config_perpetual_greeness_julday',config_perpetual_greeness_julday)
+ call mpas_pool_get_config(configs,'config_land_nudging'     ,config_land_nudging     )
+ call mpas_pool_get_config(configs,'config_land_nudging_tau' ,config_land_nudging_tau )
  call mpas_pool_get_config(configs,'config_sst_update'       ,config_sst_update       )
  call mpas_pool_get_config(configs,'config_sstdiurn_update'  ,config_sstdiurn_update  )
  call mpas_pool_get_config(configs,'config_physics_suite'    ,config_physics_suite    )
@@ -256,6 +264,32 @@
     write(mpas_err_message,'(A)') &
        'config_perpetual_all_physics requires a positive config_perpetual_julday'
     call physics_error_fatal(mpas_err_message)
+ endif
+
+!config_perpetual_greeness_julday defaults to -1., so switching config_perpetual_greeness on without
+!also choosing a day is caught here. The upper bound keeps the day within a non-leap year, which is
+!the year the fixed date is placed in by physics_timetracker.
+ if(config_perpetual_greeness) then
+    if(config_perpetual_greeness_julday < 0._RKIND .or. config_perpetual_greeness_julday >= 365._RKIND) then
+       write(mpas_err_message,'(A)') &
+          'config_perpetual_greeness requires config_perpetual_greeness_julday in [0., 365.)'
+       call physics_error_fatal(mpas_err_message)
+    endif
+ endif
+
+!land surface nudging: config_land_nudging_tau defaults to -1., so the timescale has to be chosen
+!explicitly. The nudged variables are those of the Noah scheme; Noah-MP carries its own snow layers,
+!aquifer and vegetation state, which would be left free and become inconsistent with the nudged
+!ones, so it is rejected rather than half-nudged. This check follows the resolution of 'suite'.
+ if(config_land_nudging) then
+    if(config_land_nudging_tau <= 0._RKIND) then
+       write(mpas_err_message,'(A)') 'config_land_nudging requires a positive config_land_nudging_tau'
+       call physics_error_fatal(mpas_err_message)
+    endif
+    if(trim(config_lsm_scheme) /= 'sf_noah') then
+       write(mpas_err_message,'(A)') 'config_land_nudging is only available with config_lsm_scheme = sf_noah'
+       call physics_error_fatal(mpas_err_message)
+    endif
  endif
 
 !pbl scheme:

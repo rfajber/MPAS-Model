@@ -17,6 +17,7 @@
  use mpas_atmphys_o3climatology
  use mpas_atmphys_update_surface
  use mpas_atmphys_utilities
+ use mpas_atmphys_date_time,only: cal_mon_day
 
  implicit none
  private
@@ -158,9 +159,12 @@
                    config_sst_update,         &
                    config_sstdiurn_update,    &
                    config_deepsoiltemp_update,&
-                   config_perpetual_all_physics
+                   config_perpetual_all_physics,&
+                   config_perpetual_greeness, &
+                   config_land_nudging
 
  real(kind=RKIND),pointer:: config_perpetual_julday
+ real(kind=RKIND),pointer:: config_perpetual_greeness_julday
 
  character(len=StrKIND),pointer:: config_convection_scheme, &
                                   config_radt_lw_scheme,    &
@@ -177,6 +181,7 @@
  type(mpas_pool_type),pointer:: sfc_input
  type(mpas_pool_type),pointer:: atm_input
  type(mpas_pool_type),pointer:: slab_ocean
+ type(mpas_pool_type),pointer:: land_nudging
 
 !local variables:
 
@@ -185,7 +190,9 @@
 
  logical:: LeapYear
  character(len=StrKIND)   :: timeStamp
+ character(len=StrKIND)   :: greenStamp
  integer:: ierr
+ integer:: green_month,green_day
  real(kind=RKIND):: utc_s
  real(kind=RKIND):: xtime_m
  real(kind=RKIND):: radt_julday
@@ -211,6 +218,10 @@
  call mpas_pool_get_config(domain%blocklist%configs,'config_deepsoiltemp_update',config_deepsoiltemp_update)
  call mpas_pool_get_config(domain%blocklist%configs,'config_perpetual_julday'   ,config_perpetual_julday   )
  call mpas_pool_get_config(domain%blocklist%configs,'config_perpetual_all_physics',config_perpetual_all_physics)
+ call mpas_pool_get_config(domain%blocklist%configs,'config_perpetual_greeness',config_perpetual_greeness)
+ call mpas_pool_get_config(domain%blocklist%configs,'config_land_nudging'      ,config_land_nudging      )
+ call mpas_pool_get_config(domain%blocklist%configs,'config_perpetual_greeness_julday', &
+                           config_perpetual_greeness_julday)
 
 !update the current julian day and current year:
 
@@ -231,15 +242,26 @@
  radt_julday = curr_julday
  if(config_perpetual_julday > 0._RKIND) radt_julday = config_perpetual_julday
 
-!day of the year seen by the other physics that carry an annual cycle: the deep soil temperature
-!update below, the non-orographic gravity-wave source in the gravity-wave drag driver, and Noah-MP.
-!These follow the model date unless config_perpetual_all_physics asks for them to be frozen too,
-!since freezing the radiation is the common case and freezing the land surface is not always wanted
-!with it. curr_julday itself is never overwritten, so anything that genuinely needs the model date
-!still has it.
+!day of the year seen by the other physics that carry an annual cycle: the non-orographic gravity-
+!wave source in the gravity-wave drag driver, and Noah-MP. These follow the model date unless
+!config_perpetual_all_physics asks for them to be frozen too, since freezing the radiation is the
+!common case and freezing the land surface is not always wanted with it. curr_julday itself is
+!never overwritten, so anything that genuinely needs the model date still has it.
  phys_julday = curr_julday
  if(config_perpetual_julday > 0._RKIND .and. config_perpetual_all_physics) &
     phys_julday = config_perpetual_julday
+
+!date to which the monthly climatologies of the background surface albedo and the greeness fraction
+!are interpolated. config_perpetual_greeness holds it at config_perpetual_greeness_julday, counted
+!from 0Z on January 1st like config_perpetual_julday, so that the same value can be given to both.
+!The interpolation works in whole days, so only the integer part of the day is used. The date is
+!placed in a fixed non-leap year, so that the result is the same in every year of the run and is
+!not reset to the model date by a restart.
+ greenStamp = timeStamp
+ if(config_perpetual_greeness) then
+    call cal_mon_day(int(config_perpetual_greeness_julday)+1,2001,green_month,green_day)
+    write(greenStamp,'(A,I2.2,A,I2.2,A)') '2001-',green_month,'-',green_day,'_00:00:00'
+ endif
 !call mpas_log_write('     YEAR        = $i', intArgs=(/year/))
 !call mpas_log_write('     JULDAY      = $i', intArgs=(/julday/))
 !call mpas_log_write('     GMT         = $r', realArgs=(/gmt/))
@@ -262,7 +284,7 @@
     if(mpas_is_alarm_ringing(clock,greenAlarmID,ierr=ierr)) then
        call mpas_reset_clock_alarm(clock,greenAlarmID,ierr=ierr)
        call mpas_log_write('--- time to update background surface albedo, greeness fraction.')
-       call physics_update_surface(timeStamp,config_sfc_albedo,mesh,sfc_input)
+       call physics_update_surface(greenStamp,config_sfc_albedo,mesh,sfc_input)
     endif
 
     !update surface boundary conditions with input sea-surface temperatures and fractional
@@ -279,13 +301,23 @@
        call physics_update_slab_ocean(dt_dyn,block%configs,mesh,diag_physics,sfc_input,slab_ocean)
     endif
 
+    !relax the land surface state toward its values at the start of the run. Like the slab, this
+    !acts at the top of the step, so the land surface scheme starts each step from the nudged state:
+    if(config_land_nudging) then
+       call mpas_pool_get_subpool(block%structs,'land_nudging',land_nudging)
+       call physics_update_land_nudging(dt_dyn,block%configs,mesh,sfc_input,diag_physics,land_nudging)
+    endif
+
     !apply a diurnal cycle to the sea-surface temperature:
     if(config_sstdiurn_update) &
        call physics_update_sstskin(dt_dyn,mesh,diag_physics,sfc_input)
 
-    !update the deep soil temperature:
+    !update the deep soil temperature. This always takes the model date, never phys_julday: it
+    !does not read an annual cycle, but uses the date only to find the ends of days and years
+    !over which it averages the skin temperature. A frozen date would make every time step the
+    !end of a day, or none of them, and those running means are what a perpetual run wants:
     if(config_deepsoiltemp_update) &
-       call physics_update_deepsoiltemp(LeapYear,dt_dyn,phys_julday,mesh, &
+       call physics_update_deepsoiltemp(LeapYear,dt_dyn,curr_julday,mesh, &
                     sfc_input,diag_physics)
 
     block => block % next

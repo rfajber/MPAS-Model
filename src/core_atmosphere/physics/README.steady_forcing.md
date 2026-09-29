@@ -166,11 +166,9 @@ locked.
 
 ## Freezing the date for the rest of the physics
 
-Three other parameterizations carry an annual cycle of their own, and by default
+Two other parameterizations carry an annual cycle of their own, and by default
 they keep following the model date even when the radiation has been frozen:
 
-* the **deep soil temperature** update, which relaxes `tmn` toward an annual
-  cycle of the surface temperature;
 * the **non-orographic gravity-wave drag**, whose source strength is read from
   the `ugwp_limb_tau` table as a function of day of the year;
 * the **Noah-MP** land surface, which takes the day of the year directly.
@@ -182,7 +180,7 @@ they keep following the model date even when the radiation has been frozen:
 /
 ```
 
-`config_perpetual_all_physics` extends the frozen date to all three. It is a
+`config_perpetual_all_physics` extends the frozen date to both. It is a
 separate switch because freezing the radiation is the common case and freezing
 the land surface with it is not always wanted: a run that wants a steady
 radiative forcing over a seasonally evolving land surface is a legitimate thing
@@ -190,11 +188,23 @@ to ask for. The option is ignored without a positive `config_perpetual_julday`,
 and rather than do nothing quietly, that combination is rejected at startup.
 
 For an aquaplanet it makes little practical difference, since there is no land
-and the deep soil temperature and Noah-MP never run. The gravity-wave source is
-the one that still matters.
+and Noah-MP never runs. The gravity-wave source is the one that still matters.
+
+The **deep soil temperature** update (`config_deepsoiltemp_update`) is deliberately
+left on the model date. It does not read an annual cycle: it uses the date only
+to find the ends of days and years, over which it averages the skin temperature
+into `tmn`. Given a frozen date it would treat every time step as the end of a
+day (for a whole-number day) or never reach one (otherwise). The running means
+it computes from the real calendar are what a perpetual run wants.
+
+The latitude-varying cloud decorrelation length in RRTMG
+(`config_radt_cld_dcorrlen = 'latitude_varying'`, used with the exponential
+overlap options) also depends on the day of the year. It is part of the
+radiation, so it follows `config_perpetual_julday` directly, without
+`config_perpetual_all_physics`.
 
 Internally the manager computes two days, `radt_julday` for the radiation and
-`phys_julday` for these three, and leaves `curr_julday` itself untouched. Nothing
+`phys_julday` for these two, and leaves `curr_julday` itself untouched. Nothing
 that genuinely needs the model date loses access to it.
 
 
@@ -230,4 +240,4 @@ but that is not the same as a build. If you are using RRTMG, which every bundled
 physics suite does, the CAM path is not on your critical path.
 
 `config_perpetual_all_physics` has not been run either. It changes which variable
-three call sites read, and nothing about what those parameterizations then do.
+two call sites read, and nothing about what those parameterizations then do.

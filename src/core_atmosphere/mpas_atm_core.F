@@ -420,6 +420,7 @@ module atm_core
       use mpas_atmphys_control
       use mpas_atmphys_init
       use mpas_atmphys_manager
+      use mpas_atmphys_update_surface, only : physics_init_land_nudging
 #endif
 
       implicit none
@@ -440,6 +441,7 @@ module atm_core
       type (mpas_pool_type), pointer :: ngw_input
       type (mpas_pool_type), pointer :: atm_input
       type (mpas_pool_type), pointer :: output_noahmp
+      type (mpas_pool_type), pointer :: land_nudging
 
       integer :: iCell,iEdge,iVertex,k
       
@@ -464,6 +466,7 @@ module atm_core
 
 
       logical, pointer :: config_do_restart, config_do_DAcycling
+      logical, pointer :: config_land_nudging
 
       logical, pointer :: on_a_sphere
       real (kind=RKIND), pointer :: sphere_radius
@@ -638,6 +641,16 @@ module atm_core
          !initialization of all physics:
          call physics_init(dminfo, stream_manager, clock, block % configs, mesh, diag, tend, tend_physics, state, 1, &
                            diag_physics, diag_physics_noahmp, ngw_input, atm_input, sfc_input, output_noahmp)
+
+         !store the land surface state that config_land_nudging relaxes toward. This follows
+         !physics_init so that the stored state is the one the land surface scheme starts from. On a
+         !restart the stored state is read from the restart stream instead, so that it remains the
+         !state at the start of the whole run rather than of the current segment:
+         call mpas_pool_get_config(block % configs, 'config_land_nudging', config_land_nudging)
+         if (config_land_nudging .and. .not. config_do_restart) then
+            call mpas_pool_get_subpool(block % structs, 'land_nudging', land_nudging)
+            call physics_init_land_nudging(mesh, sfc_input, diag_physics, land_nudging)
+         end if
       endif
 #endif
    
